@@ -47,7 +47,7 @@ legend('Reported Data', 'SIR Model');
 xlim([start_date end_date]);
 datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
 
-% SIR simulation function (place at end of script or in separate file)
+% SIR simulation function 
 function daily_new_cases = simulate_sir(beta, gamma, S0, I0, R0, N, num_days)
     y0 = [S0; I0; R0];
     [~, y] = ode45(@(t, y) [-beta*y(1)*y(2)/N; beta*y(1)*y(2)/N - gamma*y(2); gamma*y(2)], 0:num_days-1, y0);
@@ -90,7 +90,7 @@ sir_ode = @(t, y, beta, gamma) [
 %Fit beta using fminsearch
 beta_guess = 0.5;
 
-% Define the objective function (beta only, gamma fixed)
+% Defining the objective function (beta only, gamma fixed)
 objective = @(beta) simulate_sir(beta, gamma, S0, I0, R0, N, length(all_dates)) - admissions_full;
 
 % Minimize sum of squared differences
@@ -139,14 +139,11 @@ rho = 0.0157;        % Infection fatality ratio
 % Initial conditions
 I0 = 1; R0 = 0; S0 = N - I0 - R0;
 
-% Step 3: Define SIR Simulation Function (is defined later as a main function in this script)
-% The function simulate_sir_deaths3 will be defined below.
 
-% Step 4: Fit model to data (Corrected fminsearch for single beta)
+% Step 3: Fit model to data (Corrected fminsearch for single beta)
 data1 = deaths_full; % Data to fit
 
 % Objective function for fitting beta1
-% The 'params1' in the lambda function here will be the scalar beta we are trying to find.
 objective1 = @(beta_to_fit) simulate_sir_deaths3(beta_to_fit, gamma, S0, I0, R0, N, length(deaths_full), tau, rho) - data1;
 
 % Initial guess for beta1 (scalar)
@@ -156,8 +153,7 @@ initial_beta1_guess = 0.5;
 options = optimset('MaxFunEvals', 1000, 'MaxIter', 500, 'Display', 'iter'); % Added Display option
 
 % Perform the optimization for beta1
-% fminsearch will pass scalar values of 'b' to the objective function sum(objective1(b).^2)
-fitted_beta1 = fminsearch(@(b) sum(objective1(b).^2), initial_beta1_guess, options);
+
 
 % The fitted beta1 is now scalar
 beta1 = fitted_beta1;
@@ -171,7 +167,7 @@ figure;
 bar(all_dates, deaths_full, 'FaceColor', [0.7 0.7 0.9], 'EdgeColor', 'none');
 hold on;
 % Plot the model deaths against the correct dates
-plot(all_dates, deaths1_model, 'r-', 'LineWidth', 2); % Added 'r-' for red line
+plot(all_dates, deaths1_model, 'r-', 'LineWidth', 2); 
 hold off;
 
 xlabel('Date');
@@ -189,13 +185,12 @@ function daily_deaths = simulate_sir_deaths3(beta1_param, gamma_param, S0_param,
     % Simulate SIR model and convert to deaths with lag
     y0 = [S0_param; I0_param; R0_param];
     
-    % Check for num_days to avoid issues with ode45 or diff
+  
     if num_days_param <= 0
         daily_deaths = zeros(0,1); % Or handle as an error
         return;
     elseif num_days_param == 1
-        % For a single day, ODE integration isn't very meaningful for dynamics
-        % but we can estimate removals based on I0
+        
         y = y0'; % Represents state at t=0
     else
         % Call ode45 with the sir_ode_system (defined below as a sub-function)
@@ -213,8 +208,7 @@ function daily_deaths = simulate_sir_deaths3(beta1_param, gamma_param, S0_param,
 
     % Ensure daily_removals is a column vector of correct length
     if length(daily_removals) < num_days_param
-        % This can happen if num_days_param is small and diff reduces length
-        % Pad with zeros or handle appropriately, here just ensuring it's column
+        
         temp_removals = zeros(num_days_param, 1);
         temp_removals(1:length(daily_removals)) = daily_removals;
         daily_removals = temp_removals;
@@ -236,11 +230,11 @@ function daily_deaths = simulate_sir_deaths3(beta1_param, gamma_param, S0_param,
         else % num_days_param is not much larger than tau_param
              daily_deaths = zeros(num_days_param,1);
         end
-        % Ensure daily_deaths is the correct length if deaths_from_removals was short
+        % Ensures daily_deaths is the correct length if deaths_from_removals was short
         if length(daily_deaths) < num_days_param
             daily_deaths = [daily_deaths; zeros(num_days_param - length(daily_deaths),1)];
         end
-        daily_deaths = daily_deaths(1:num_days_param); % Truncate if too long
+        daily_deaths = daily_deaths(1:num_days_param); 
 
     else
         daily_deaths = zeros(num_days_param,1);
@@ -251,7 +245,7 @@ end
 function dydt = sir_ode_system(t, y_sir, beta_val, N_val, gamma_val)
     S = y_sir(1);
     I = y_sir(2);
-    % R = y_sir(3); % R is not used in the RHS of these equations
+    % R = y_sir(3); 
 
     dSdt = -beta_val * S * I / N_val;
     dIdt =  beta_val * S * I / N_val - gamma_val * I;
@@ -336,7 +330,7 @@ end
 % Step 1: Load Data
 filename = 'england healthcare nation_newAdmissions.csv.xlsx';
 data = readtable(filename, 'Sheet', 'nation_newAdmissions');
-dates_data = datetime(data.date); % Renamed to avoid conflict with function argument
+dates_data = datetime(data.date);
 admissions = data.value;
 
 start_date = datetime('2020-01-01');
@@ -349,7 +343,7 @@ admissions_full = zeros(num_total_days,1);
 valid_idx = idx > 0;
 admissions_full(idx(valid_idx)) = admissions(valid_idx);
 
-% Step 2: Define SIR Simulation Functions (using the structure from Code 2)
+% Step 2: Define SIR Simulation Functions 
 % The main simulation function 'simulate_sir_admissions_2betas' and its helper 'sir_ode_2betas'
 % will be defined at the end of the script.
 
@@ -411,7 +405,7 @@ valid_idx = idx > 0;
 deaths_full(idx(valid_idx)) = deaths(valid_idx);
 
 % Defining split point (April 8, 2020)
-phase1_end = datetime('2020-04-06') - days(8); % Explicitly use days
+phase1_end = datetime('2020-04-06') - days(8); 
 lockdown_day = days(phase1_end - start_date); % Convert duration to a scalar number of days
 
 % Step 2: Set Model Parameters
@@ -721,7 +715,7 @@ function daily_deaths = simulate_sir_deaths_3phases(beta1_sim, beta2_sim, beta3_
         if num_days_sim > 1
              daily_removals_calc(2:min(num_days_sim, length(new_R_values)+1)) = new_R_values(1:min(num_days_sim-1, length(new_R_values)));
         end
-    elseif size(y_sir_solution,1) == 1 && num_days_sim ==1 % Edge case: only 1 day
+    elseif size(y_sir_solution,1) == 1 && num_days_sim ==1 
         daily_removals_calc(1) = gamma_sim * I0_sim;
     end
     
@@ -773,19 +767,19 @@ num_days_simulation = length(all_dates_sim);
 
 reported_cases_full_series = zeros(num_days_simulation, 1);
 [~, idx_in_all] = ismember(dates_reported, all_dates_sim);
-% Correctly handle cases where ismember returns 0 for dates not in all_dates_sim
+
 valid_data_indices_in_reported = idx_in_all > 0;
 corresponding_indices_in_full_series = idx_in_all(valid_data_indices_in_reported);
 reported_cases_full_series(corresponding_indices_in_full_series) = new_cases_reported(valid_data_indices_in_reported);
-reported_cases_full_series(isnan(reported_cases_full_series)) = 0; % Replace any NaNs that might have been in data
+reported_cases_full_series(isnan(reported_cases_full_series)) = 0; 
 
 N = 56000000; % England population
 I0_cases = 1; 
 R0_cases = 0; 
-S0_cases = N - I0_cases - R0_cases; % Corrected: Use I0_cases and R0_cases
+S0_cases = N - I0_cases - R0_cases; 
 gamma_cases = 0.2;
 
-% Fitted beta values (ensure these are appropriate for your model and data)
+% Fitted beta values 
 beta1_fitted_cases = 0.284866;   
 beta2_fitted_cases = 0.112748;  
 beta3_fitted_cases = 0.262636;
@@ -797,7 +791,7 @@ fprintf('Beta1 (Cases): %f\nBeta2 (Cases): %f\nBeta3 (Cases): %f\n', beta1_fitte
 original_phase2_start_cases_date = datetime('2020-04-17');
 original_phase3_start_cases_date = datetime('2020-07-01');
 
-% Convert dates to 0-indexed day numbers from simulation start
+% Converting dates 
 original_lockdown_day1_cases_numeric = days(original_phase2_start_cases_date - start_date_sim);
 original_lockdown_day2_cases_numeric = days(original_phase3_start_cases_date - start_date_sim);
 
@@ -816,8 +810,7 @@ disp('Defining counterfactual (earlier) lockdown dates...');
 days_to_shift = 7;
 counterfactual_phase2_start_date_cases = original_phase2_start_cases_date - days(days_to_shift);
 % Shifting the start of phase 3 consistently with phase 2
-% This implies the duration of phase 2 (lockdown) remains the same.
-% If phase 3 start should be independent or also shifted by a fixed amount from original phase 3 start:
+
 counterfactual_phase3_start_date_cases = original_phase3_start_cases_date - days(days_to_shift); 
 
 cf_lockdown_day1_cases_numeric = days(counterfactual_phase2_start_date_cases - start_date_sim);
@@ -846,17 +839,15 @@ xlabel('Date');
 ylabel('New Cases per Day');
 legend('show', 'Location', 'northwest');
 xlim([start_date_sim, end_date_sim]);
-% Adjust Y-limit based on typical case numbers, or make it dynamic
-% peak_val = max([max(reported_cases_full_series), max(original_model_cases), max(cf_model_cases)]);
-% ylim([0, peak_val*1.1]); 
-ylim([0, 30000]); % User's original limit
+
+ylim([0, 30000]); 
 datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
 grid off;
 
 % Analysis
 peak_original_cases = max(original_model_cases);
 peak_cf_cases = max(cf_model_cases);
-total_original_cases = sum(original_model_cases); % Summing daily new cases
+total_original_cases = sum(original_model_cases); % adding daily new cases
 total_cf_cases = sum(cf_model_cases);
 
 fprintf('\n--- Quantitative Comparison for Cases ---\n');
@@ -877,20 +868,20 @@ else
 end
 
 %Function Definition for SIR Simulation with 3 Beta Values using ode45
-% This function should be placed at the end of your script or in a separate .m file named 'simulate_sir_3betas1.m'
+
 
 function daily_new_cases = simulate_sir_3betas1(beta1, beta2, beta3, ...
                                              lockdown_day1_numeric, lockdown_day2_numeric, ...
                                              gamma_val, S_initial, I_initial, R_initial, N_population, num_simulation_days)
     
     % --- Nested ODE  ---
-    %  nesting allows access of parameters from the outer function's scope (beta values, N, gamma etc.)
+  
     function dydt = sir_odes_three_betas(t, y)
         S_current = y(1);
         I_current = y(2);
         % R_current = y(3); % Not directly used for dS, dI equations
 
-        % Determine current beta based on time t (0-indexed from simulation start)
+       
         % lockdown_day1_numeric is the first day (0-indexed) when beta2 applies
         % lockdown_day2_numeric is the first day (0-indexed) when beta3 applies
         current_beta = 0;
@@ -918,10 +909,10 @@ function daily_new_cases = simulate_sir_3betas1(beta1, beta2, beta3, ...
     % ODE solver options 
     options = odeset('RelTol', 1e-6, 'AbsTol', 1e-6, 'NonNegative', [1,2,3]);
 
-    % Solve the system of ODEs
+    % Solve the ODEs
     [~, solution_ode] = ode45(@sir_odes_three_betas, t_span, y0, options);
 
-    S_values_over_time = solution_ode(:,1); % S values at t=0, t=1, ..., t=num_simulation_days
+    S_values_over_time = solution_ode(:,1); 
 
     if length(S_values_over_time) > 1
         daily_new_cases = S_values_over_time(1:end-1) - S_values_over_time(2:end);
@@ -945,8 +936,7 @@ function daily_new_cases = simulate_sir_3betas1(beta1, beta2, beta3, ...
     % Ensure no negative values due to numerical artifacts
     daily_new_cases = max(0, daily_new_cases);
 
-    % --- Warnings for lockdown day logic ---
-    % (These are illustrative; ensure they match your intended phase logic interpretation)
+    %  Warnings for lockdown day logic
     if lockdown_day1_numeric >= lockdown_day2_numeric && (lockdown_day2_numeric < num_simulation_days)
         % This means phase 2 starts on or after phase 3 starts, and phase 3 is relevant.
         warning('Lockdown Day 2 (day %.0f) is not after Lockdown Day 1 (day %.0f). Phase 3 might effectively override Phase 2 or cause unexpected beta sequence.', lockdown_day2_numeric, lockdown_day1_numeric);
@@ -1145,7 +1135,7 @@ cf_lockdown_day2_deaths_numeric = days(counterfactual_phase3_start_date_deaths -
 fprintf('Counterfactual Phase 2 Start Date (Deaths): %s (Day %d)\n', datestr(counterfactual_phase2_start_date_deaths), cf_lockdown_day1_deaths_numeric);
 fprintf('Counterfactual Phase 3 Start Date (Deaths): %s (Day %d)\n', datestr(counterfactual_phase3_start_date_deaths), cf_lockdown_day2_deaths_numeric);
 
-%  Counterfactual (Earlier) Lockdown Scenario for Deaths ---
+%  Counterfactual (Earlier) Lockdown Scenario for Deaths 
 disp('Simulating counterfactual (earlier) lockdown scenario for deaths...');
 cf_model_deaths = simulate_sir_deaths_3phases(beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths, ...
                                           cf_lockdown_day1_deaths_numeric, cf_lockdown_day2_deaths_numeric, ...
@@ -1954,7 +1944,7 @@ ylim([0 30000]);
 datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
 grid off;
 
-% --- Quantitative Analysis (Adjusted for "Relaxation Later" scenario) ---
+%  Quantitative Analysis 
 peak_original_cases = max(original_model_cases);
 peak_cf_relax_later_cases = max(cf_relax_later_model_cases);
 total_original_cases = sum(original_model_cases);
@@ -2509,7 +2499,7 @@ disp('Original deaths scenario simulation complete.');
 disp('Defining counterfactual (RELAXATION 7 DAYS LATER) dates for deaths...');
 days_to_shift_relaxation_deaths = 7;
 
-% Phase 2 (lockdown) start date REMAINS THE SAME
+% Phase 2 (lockdown) start date is the same
 cf_relax_later_phase2_start_date_deaths = original_phase2_start_date_deaths;
 
 % Phase 3 (relaxation) start date is SHIFTED LATER
@@ -2570,7 +2560,7 @@ disp('Counterfactual analysis for deaths complete.');
 % SIRV Model
 % Death Data (
 filename_deaths = 'england deaths nation_newDailyNsoDeathsByDeathDate.csv.xlsx';
-data_table_deaths = readtable(filename_deaths); % Assuming this loads correctly as in your script
+data_table_deaths = readtable(filename_deaths); 
 dates_reported_deaths = datetime(data_table_deaths.date);
 deaths_reported_values = data_table_deaths.value;
 
@@ -2604,7 +2594,7 @@ disp('Defining model parameters...');
 N_population = 56e6;       
 gamma_rate = 1/5;          
 tau_death_lag = 8;         
-% rho_ifr is now scenario-dependent, original was 0.0157
+ rho_ifr =  0.0157
 
 % Initial conditions for SIRV model
 I0_initial = 10; 
@@ -2630,7 +2620,6 @@ disp('Defining scenarios...');
 
 scenarios = {};
 
-% Illustrative IFR values:
 rho_ifr_baseline_effective = 0.010; % Lower effective IFR for baseline with vaccines
 rho_ifr_no_vaccine_higher = 0.020;  % Higher IFR for scenario with no vaccines
 
@@ -2642,7 +2631,7 @@ scenarios{1}.beta3 = beta3_base;
 scenarios{1}.lockdown_day1 = lockdown_day1_original_numeric;
 scenarios{1}.lockdown_day2 = lockdown_day2_original_numeric;
 scenarios{1}.vaccinations = daily_vaccinations_full_series;
-scenarios{1}.rho_ifr = rho_ifr_baseline_effective; % Use lower IFR
+scenarios{1}.rho_ifr = rho_ifr_baseline_effective; 
 scenarios{1}.color = 'b';
 scenarios{1}.linestyle = '-';
 
@@ -2696,7 +2685,7 @@ for i = 1:length(scenarios)
         scenarios{i}.beta1, scenarios{i}.beta2, scenarios{i}.beta3, ...
         scenarios{i}.lockdown_day1, scenarios{i}.lockdown_day2, ...
         gamma_rate, S0_initial, I0_initial, R0_initial, V0_initial, N_population, ...
-        num_days_simulation, tau_death_lag, scenarios{i}.rho_ifr, scenarios{i}.vaccinations); % Pass scenario-specific rho_ifr
+        num_days_simulation, tau_death_lag, scenarios{i}.rho_ifr, scenarios{i}.vaccinations); 
     
     results{i}.daily_deaths = daily_deaths;
     results{i}.cumulative_deaths = cumsum(daily_deaths);
@@ -2729,7 +2718,7 @@ xticks(threeMonthTicks);
 xtickformat('MMM yyyy');
 ylabel('Cumulative Deaths');
 legend('show', 'Location', 'northwest');
-grid off; % Changed from grid on; to grid off; as per original code
+grid off; 
 
 
 % total deaths for each scenario
@@ -2794,7 +2783,7 @@ function [daily_deaths_calc, S_out, I_out, R_out, V_out, daily_new_cases_calc] =
         for k_day_idx = tau_sim : (num_days_sim_input - 1) 
             source_removal_idx = k_day_idx - tau_sim; 
             if (source_removal_idx + 1) <= length(daily_removals_calc) 
-                % Use the scenario-specific rho_ifr passed to the function
+               
                 daily_deaths_calc(k_day_idx + 1) = rho_ifr_scenario_specific * daily_removals_calc(source_removal_idx + 1);
             end
         end
@@ -2842,7 +2831,7 @@ end
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 %% Lockdown/Relaxation timing (-7, 0, +7, etc.) against Peak and total cases/admissions/deaths 
 
-% Common Initial Parameters
+%  Initial Parameters
 N_population = 56000000;
 gamma_rate = 0.2; % Recovery rate (1/average infectious period)
 I0_initial = 1; % Initial number of infected individuals
@@ -2850,7 +2839,7 @@ R0_initial = 0; % Initial number of recovered individuals
 S0_initial = N_population - I0_initial - R0_initial;
 
 start_date_sim = datetime('2020-01-01');
-% Extend simulation end date if needed, current one from your code is used
+
 end_date_sim_overall = datetime('2022-12-02');
 num_days_simulation = days(end_date_sim_overall - start_date_sim) + 1;
 all_dates_sim_overall = start_date_sim + days(0:num_days_simulation-1);
@@ -2860,9 +2849,6 @@ rho_ifr = 0.0157;   % Infection Fatality Rate
 
 disp('--- Model Parameters Defined ---');
 
-% Define Multi-Phase Beta Schedules
-% These are examples. You MUST tailor these dates and beta values.
-% Each entry: .start_day_offset (from start_date_sim), .beta_value
 
 % Beta Schedule for CASES
 beta_schedule_cases = [];
@@ -2926,16 +2912,14 @@ function daily_outputs = simulate_sir_cases_adms_multi_wave(beta_schedule_sim, g
     [T_sol, y_sir_solution] = ode45(@(t,y_ode) sir_multi_phase_ode(t, y_ode, N_sim, gamma_sim, beta_schedule_sim), t_span_sim, y0_sim, options_ode);
     
     S_values = y_sir_solution(:,1);
-    % Calculate daily new infections (approximated by change in S)
+    % Calculating daily new infections (approximated by change in S)
     % This represents the flux into the I compartment from S
     daily_outputs = zeros(num_days_sim_func,1);
     if num_days_sim_func >= 1
         % Infections occurring during day 0 (between t=0 and t=1)
         daily_outputs(1) = S0_sim - S_values(1); 
         if num_days_sim_func > 1
-            % Infections occurring during day k (between t=k and t=k+1), S_values(k) is S at time k.
-            % S_values(k) is S at start of day k, S_values(k+1) is S at end of day k / start of day k+1
-            % So, S_values(k-1) is S at start of interval, S_values(k) is S at end of interval for output(k)
+           
              for day_idx = 2:num_days_sim_func
                 daily_outputs(day_idx) = S_values(day_idx-1) - S_values(day_idx);
              end
@@ -2960,8 +2944,7 @@ function daily_deaths_calc = simulate_sir_deaths_multi_wave(beta_schedule_sim, g
         % R_values(1) is R at t=1 (end of day 0). R0_sim is R at t=0.
         daily_removals_calc(1) = R_values(1) - R0_sim;
         if num_days_sim_func > 1
-            % daily_removals_calc(k) = R_values(k) - R_values(k-1)
-            % R_values(k) is R at end of day k-1. R_values(k-1) is R at end of day k-2.
+           
             for day_idx = 2:num_days_sim_func
                 daily_removals_calc(day_idx) = R_values(day_idx) - R_values(day_idx-1);
             end
@@ -2971,10 +2954,7 @@ function daily_deaths_calc = simulate_sir_deaths_multi_wave(beta_schedule_sim, g
 
     daily_deaths_calc = zeros(num_days_sim_func,1);
     if num_days_sim_func > tau_sim
-        % Deaths on day k occur from removals on day k-tau_sim
-        % daily_deaths_calc(d) from daily_removals_calc(d - tau_sim)
-        % So if d from (tau_sim+1) to num_days_sim_func
-        % then d-tau_sim is from 1 to num_days_sim_func - tau_sim
+       
         valid_indices_removals = 1:(num_days_sim_func-tau_sim);
         daily_deaths_calc((tau_sim+1):num_days_sim_func) = rho_sim * daily_removals_calc(valid_indices_removals);
     end
@@ -2982,7 +2962,7 @@ function daily_deaths_calc = simulate_sir_deaths_multi_wave(beta_schedule_sim, g
     daily_deaths_calc = max(0, daily_deaths_calc);
 end
 
-% FIGURE 1 (renamed from Fig 2 in original): Impact of Shifting Intervention Periods
+% FIGURE 1: Impact of Shifting Intervention Periods
 shifts = [-21, -14, -7, 0, 7, 14, 21]; % Days to shift all intervention start dates
 num_shifts = length(shifts);
 
@@ -2990,7 +2970,7 @@ peak_cases_fig1 = zeros(1, num_shifts); total_cases_fig1 = zeros(1, num_shifts);
 peak_adms_fig1 = zeros(1, num_shifts); total_adms_fig1 = zeros(1, num_shifts);
 peak_deaths_fig1 = zeros(1, num_shifts); total_deaths_fig1 = zeros(1, num_shifts);
 
-% Store baseline (shift=0) daily trajectories for detailed plotting
+
 baseline_daily_cases = [];
 baseline_daily_adms = [];
 baseline_daily_deaths = [];
@@ -3000,8 +2980,8 @@ for i = 1:num_shifts
     shift_days = shifts(i);
     fprintf('Simulating for intervention shift: %d days\n', shift_days);
 
-    % Apply shift to beta schedules
-    % (Shift all start_day_offsets except the first one which is always 0)
+    % Apply shift to beta 
+   
     current_beta_schedule_cases = beta_schedule_cases;
     for k=2:length(current_beta_schedule_cases)
         current_beta_schedule_cases(k).start_day_offset = beta_schedule_cases(k).start_day_offset + shift_days;
@@ -3043,10 +3023,8 @@ fprintf('Total Admissions: %s\n', mat2str(round(total_adms_fig1)));
 fprintf('Highest Peak Deaths: %s\n', mat2str(round(peak_deaths_fig1)));
 fprintf('Total Deaths: %s\n', mat2str(round(total_deaths_fig1)));
 
-% --- Plotting for Figure 1 (similar to your original Fig 1a-1f plots) ---
-% These plots show how the *highest peak* and *total counts* over the *entire multi-wave simulation*
-% change when all intervention timings in the beta schedule are shifted.
-
+%  Plotting Figure 1 
+% These plots show how the highest peak and total counts 
 % Figure 1a: Peak Cases
 figure('Name', 'Figure 1a: Impact on Highest Peak Daily Cases (Multi-Wave)');
 plot(shifts, peak_cases_fig1, '-o', 'LineWidth', 1.5, 'MarkerSize', 6);
@@ -3083,11 +3061,8 @@ plot(shifts, total_deaths_fig1, '-x', 'LineWidth', 1.5, 'MarkerSize', 6, 'Color'
 title('Impact of Shifting Interventions on Total Deaths (Multi-Wave)');
 ylabel('Total Deaths'); xlabel('Shift in Intervention Timing (Days)'); grid off; ax = gca; ax.XTick = shifts;
 
-% Plotting Baseline Multi-Wave Trajectories with Identified Peaks
-% This section plots the full time course for the baseline (shift=0) scenario
-% and uses findpeaks to mark multiple waves.
 
-min_peak_height_cases = max(baseline_daily_cases) * 0.1; % Example: peaks at least 10% of max
+min_peak_height_cases = max(baseline_daily_cases) * 0.1; 
 min_peak_dist_days = 60; % Minimum 60 days between peaks
 
 figure('Name', 'Baseline Multi-Wave Scenario: Daily Cases with Peaks');
