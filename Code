@@ -1,0 +1,3097 @@
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% CASES 
+filename = 'england cases nation_newCasesBySpecimenDate.csv.xlsx';
+data = readtable(filename, 'Sheet', 'nation_newCasesBySpecimenDate');
+dates = datetime(data.date); % MATLAB date format conversion
+new_cases = data.value;      % Daily new cases
+start_date = datetime('2020-01-01');
+end_date = datetime('202-04-02');
+all_dates = (start_date:end_date)';
+
+% Fill new_cases_full with zeros
+new_cases_full = zeros(length(all_dates),1);
+
+% Fill in the available data
+[~, idx_in_all] = ismember(dates, all_dates);
+new_cases_full(idx_in_all(idx_in_all>0)) = new_cases(idx_in_all>0);
+
+N = 56000000; % Total population
+gamma = 0.2;  % Recovery rate (fixed)
+I0 = 1;       % Initial infected
+R0 = 0;       % Initial recovered
+S0 = N - I0 - R0; % Initial susceptible
+
+
+ %Fit beta using fminsearch
+beta_guess = 0.5;
+
+% Define the objective function (beta only, gamma fixed)
+objective = @(beta) simulate_sir(beta, gamma, S0, I0, R0, N, length(all_dates)) - new_cases_full;
+
+% Minimize sum of squared differences
+beta_fit1 = fminsearch(@(beta) sum(objective(beta).^2), beta_guess);
+
+% Simulate fitted model
+model_new_cases = simulate_sir(beta_fit1, gamma, S0, I0, R0, N, length(all_dates));
+
+ %Plot results
+figure;
+bar(all_dates, new_cases_full, 'FaceColor', [0.7 0.7 0.9], 'EdgeColor', 'none'); % Histogram for data
+hold on;
+plot(all_dates, model_new_cases, 'r-', 'LineWidth', 2); % SIR model as a line
+hold off;
+xlabel('Date');
+ylabel('New COVID-19 Cases per Day');
+title('COVID-19 New Cases in England and SIR Model Fit');
+legend('Reported Data', 'SIR Model');
+xlim([start_date end_date]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+
+% SIR simulation function 
+function daily_new_cases = simulate_sir(beta, gamma, S0, I0, R0, N, num_days)
+    y0 = [S0; I0; R0];
+    [~, y] = ode45(@(t, y) [-beta*y(1)*y(2)/N; beta*y(1)*y(2)/N - gamma*y(2); gamma*y(2)], 0:num_days-1, y0);
+    S = y(:,1);
+    daily_new_cases = -diff([S0; S]); % New cases per day
+end
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%%admissions%%
+filename = 'england healthcare nation_newAdmissions.csv.xlsx';
+data = readtable(filename, 'Sheet', 'nation_newAdmissions');
+dates = datetime(data.date);    % Converting  dates to MATLAB  format
+admissions = data.value;        % Daily new hospital admissions
+
+start_date = datetime('2020-01-01');
+end_date = datetime('2023-04-02');
+all_dates = (start_date:end_date)';
+
+% Initialising admissions_full with zeros
+admissions_full = zeros(length(all_dates),1);
+
+% Filling in the available data
+[~, idx_in_all] = ismember(dates, all_dates);
+admissions_full(idx_in_all(idx_in_all>0)) = admissions(idx_in_all>0);
+
+N = 56000000; % Total population
+gamma = 0.2;  % Recovery rate (fixed)
+I0 = 1;       % Initial infected
+R0 = 0;       % Initial recovered
+S0 = N - I0 - R0; % Initial susceptible
+
+num_days = length(all_dates);
+
+sir_ode = @(t, y, beta, gamma) [
+    -beta * y(1) * y(2) / N;               % dS/dt
+     beta * y(1) * y(2) / N - gamma * y(2);% dI/dt
+     gamma * y(2)                          % dR/dt
+];
+
+
+%Fit beta using fminsearch
+beta_guess = 0.5;
+
+% Defining the objective function (beta only, gamma fixed)
+objective = @(beta) simulate_sir(beta, gamma, S0, I0, R0, N, length(all_dates)) - admissions_full;
+
+% Minimize sum of squared differences
+beta_fitadmissions = fminsearch(@(beta) sum(objective(beta).^2), beta_guess);
+
+model_new_infections = simulate_sir(beta_fitadmissions, gamma, S0, I0, R0, N, length(all_dates)); %simulating the fitted model
+
+figure;
+bar(all_dates, admissions_full, 'FaceColor', [0.7 0.7 0.9], 'EdgeColor', 'none'); % Histogram for data
+hold on;
+plot(all_dates, model_new_infections, 'r-', 'LineWidth', 2); % SIR model as a line
+hold off;
+xlabel('Date');
+ylabel('New Hospital Admissions per Day');
+title('COVID-19 Hospital Admissions in England and SIR Model Fit');
+legend('Reported Admissions', 'SIR Model');
+xlim([start_date end_date]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%%deaths
+% Step 1: Load and Prepare Data
+filename = 'england deaths nation_newDailyNsoDeathsByDeathDate.csv.xlsx';
+data = readtable(filename);
+dates = datetime(data.date);
+deaths = data.value;
+
+% Date range from Jan 1 to April 2, 2020
+start_date = datetime('2020-01-01');
+end_date = datetime('2020-04-02');
+all_dates = (start_date:end_date)';
+deaths_full = zeros(length(all_dates),1);
+
+% Filling in available data
+[~, idx] = ismember(dates, all_dates);
+valid_idx = idx > 0;
+deaths_full(idx(valid_idx)) = deaths(valid_idx);
+
+
+% Step 2: Set Model Parameters
+N = 56e6;           % England population
+gamma = 1/5;       % 5-day recovery period (recovery rate)
+tau = 8;           % Death lag (days)
+rho = 0.0157;        % Infection fatality ratio
+
+% Initial conditions
+I0 = 1; R0 = 0; S0 = N - I0 - R0;
+
+
+% Step 3: Fit model to data (Corrected fminsearch for single beta)
+data1 = deaths_full; % Data to fit
+
+% Objective function for fitting beta1
+objective1 = @(beta_to_fit) simulate_sir_deaths3(beta_to_fit, gamma, S0, I0, R0, N, length(deaths_full), tau, rho) - data1;
+
+% Initial guess for beta1 (scalar)
+initial_beta1_guess = 0.5;
+
+% Optimization options
+options = optimset('MaxFunEvals', 1000, 'MaxIter', 500, 'Display', 'iter'); % Added Display option
+
+% Perform the optimization for beta1
+
+
+% The fitted beta1 is now scalar
+beta1 = fitted_beta1;
+
+% Simulate with the fitted beta1
+num_total_days = length(deaths_full);
+deaths1_model = simulate_sir_deaths3(beta1, gamma, S0, I0, R0, N, num_total_days, tau, rho);
+
+% Step 5: Plot Results
+figure;
+bar(all_dates, deaths_full, 'FaceColor', [0.7 0.7 0.9], 'EdgeColor', 'none');
+hold on;
+% Plot the model deaths against the correct dates
+plot(all_dates, deaths1_model, 'r-', 'LineWidth', 2); 
+hold off;
+
+xlabel('Date');
+ylabel('Daily Deaths');
+title('COVID-19 Daily Deaths in England: SIR Model Fit (Single Beta)');
+
+legend('Reported Deaths', 'SIR Model Fit', 'Location', 'best');
+grid off;
+datetick('x', 'mmm dd', 'keeplimits'); % Useful for date axes
+
+
+% Main SIR Simulation Function
+
+function daily_deaths = simulate_sir_deaths3(beta1_param, gamma_param, S0_param, I0_param, R0_param, N_param, num_days_param, tau_param, rho_param)
+    % Simulate SIR model and convert to deaths with lag
+    y0 = [S0_param; I0_param; R0_param];
+    
+  
+    if num_days_param <= 0
+        daily_deaths = zeros(0,1); % Or handle as an error
+        return;
+    elseif num_days_param == 1
+        
+        y = y0'; % Represents state at t=0
+    else
+        % Call ode45 with the sir_ode_system (defined below as a sub-function)
+        [~, y] = ode45(@(t,y_ode) sir_ode_system(t, y_ode, beta1_param, N_param, gamma_param), 0:num_days_param-1, y0);
+    end
+    
+    % Calculate daily removals (new R)
+    if num_days_param == 1
+        daily_removals = [gamma_param*I0_param];
+    elseif isempty(y) || size(y,1) < 2 % handles num_days_param=0 or if ode45 failed unexpectedly for short periods
+        daily_removals = zeros(num_days_param,1); % Or appropriately sized empty
+    else
+         daily_removals = [gamma_param*I0_param; diff(y(:,3))];
+    end
+
+    % Ensure daily_removals is a column vector of correct length
+    if length(daily_removals) < num_days_param
+        
+        temp_removals = zeros(num_days_param, 1);
+        temp_removals(1:length(daily_removals)) = daily_removals;
+        daily_removals = temp_removals;
+    elseif length(daily_removals) > num_days_param
+        daily_removals = daily_removals(1:num_days_param);
+    end
+    if size(daily_removals,2) > 1 % Ensure column vector
+        daily_removals = daily_removals';
+    end
+
+    % Apply death lag and fatality ratio
+    if num_days_param > tau_param
+        % Deaths start after 'tau_param' days
+        % The number of elements from daily_removals to use is num_days_param - tau_param
+        num_death_points = num_days_param - tau_param;
+        if num_death_points > 0
+            deaths_from_removals = rho_param * daily_removals(1:num_death_points);
+            daily_deaths = [zeros(tau_param,1); deaths_from_removals];
+        else % num_days_param is not much larger than tau_param
+             daily_deaths = zeros(num_days_param,1);
+        end
+        % Ensures daily_deaths is the correct length if deaths_from_removals was short
+        if length(daily_deaths) < num_days_param
+            daily_deaths = [daily_deaths; zeros(num_days_param - length(daily_deaths),1)];
+        end
+        daily_deaths = daily_deaths(1:num_days_param); 
+
+    else
+        daily_deaths = zeros(num_days_param,1);
+    end
+end
+
+% SIR ODE
+function dydt = sir_ode_system(t, y_sir, beta_val, N_val, gamma_val)
+    S = y_sir(1);
+    I = y_sir(2);
+    % R = y_sir(3); 
+
+    dSdt = -beta_val * S * I / N_val;
+    dIdt =  beta_val * S * I / N_val - gamma_val * I;
+    dRdt =  gamma_val * I;
+    
+    dydt = [dSdt; dIdt; dRdt];
+end
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%%cases with two beta values%%
+filename = 'england cases nation_newCasesBySpecimenDate.csv.xlsx';
+data = readtable(filename, 'Sheet', 'nation_newCasesBySpecimenDate');
+dates = datetime(data.date);
+new_cases = data.value;
+
+start_date = datetime('2020-01-01');
+% Decline should be visible
+end_date = datetime('2020-06-30');
+all_dates = (start_date:end_date)';
+new_cases_full = zeros(length(all_dates), 1);
+[~, idx_in_all] = ismember(dates, all_dates);
+new_cases_full(idx_in_all(idx_in_all > 0)) = new_cases(idx_in_all > 0);
+
+% Defining split point (April 8, 2020)
+phase1_end = datetime('2020-04-17');
+lockdown_day = phase1_end - start_date; % convert duration to scalar number of days
+
+
+N = 56000000; % England population
+I0 = 1; R0 = 0; S0 = N - I0 - R0;
+gamma = 0.2;
+
+% fitting to upswing
+num_days = length(all_dates);
+data1 = new_cases_full;
+
+beta1_cases = 0.284866; beta2_cases = 0.112748;
+
+% Simulate with fitted betas
+model1 = simulate_sir1(beta1_cases, beta2_cases, lockdown_day, gamma, S0, I0, R0, N, num_days);
+
+
+% Plotting
+figure;
+bar(all_dates, new_cases_full, 'FaceColor', [0.7 0.7 0.9], 'EdgeColor', 'none'); % Data
+hold on;
+plot(all_dates, model1, 'r', 'LineWidth', 2); % Model
+hold off;
+xlabel('Date');
+ylabel('New COVID-19 Cases per Day');
+title('COVID-19 New Cases in England: Two-Phase SIR Model Fit');
+legend('Reported Data', 'SIR Model');
+xlim([start_date, end_date]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+
+% --- SIR Simulation Function ---
+function new_cases = simulate_sir1(beta1_cases, beta2_cases, lockdown_day, gamma, S0, I0, R0, N, num_days)
+    % Simulate SIR model and convert to cases
+    y0 = [S0; I0; R0];
+    [~, y] = ode45(@(t,y) simulate_2_betas(t,y,beta1_cases,beta2_cases,N,lockdown_day,gamma), 0:num_days-1, y0);
+    
+    % Calculate daily cases (new I)
+    new_cases = [beta1_cases*I0; diff(cumsum(y(:,2)))];
+end
+
+function output = simulate_2_betas(t,y,beta1_cases,beta2_cases,N,lockdown_day,gamma)
+if t < lockdown_day
+    % Phase 1: Before lockdown
+    current_beta = beta1_cases;
+else
+    % Phase 2: During/After lockdown
+    current_beta = beta2_cases;
+end
+    output = [-current_beta*y(1)*y(2)/N; current_beta*y(1)*y(2)/N - gamma*y(2); gamma*y(2)];
+
+end
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+%  admissions with two beta values 
+
+% Step 1: Load Data
+filename = 'england healthcare nation_newAdmissions.csv.xlsx';
+data = readtable(filename, 'Sheet', 'nation_newAdmissions');
+dates_data = datetime(data.date);
+admissions = data.value;
+
+start_date = datetime('2020-01-01');
+end_date = datetime('2020-07-01'); % Need to show decline
+all_dates_plot = (start_date:end_date)'; % Renamed for clarity in plotting
+num_total_days = length(all_dates_plot);
+
+admissions_full = zeros(num_total_days,1);
+[~, idx] = ismember(dates_data, all_dates_plot);
+valid_idx = idx > 0;
+admissions_full(idx(valid_idx)) = admissions(valid_idx);
+
+% Step 2: Define SIR Simulation Functions 
+% The main simulation function 'simulate_sir_admissions_2betas' and its helper 'sir_ode_2betas'
+% will be defined at the end of the script.
+
+% Step 3: Set Model Parameters
+N = 56000000; % England population
+gamma = 1/5; % 5-day recovery period (infectious period)
+I0 = 1; R0 = 0; S0 = N - I0 - R0; 
+
+% Define when beta changes (lockdown effect)
+lockdown_transition_date = datetime('2020-04-01');
+% lockdown_day is the 0-indexed day number. If lockdown_day is X, then beta1 applies for t=0 to X-1, beta2 for t=X onwards.
+lockdown_day_index = days(lockdown_transition_date - start_date); % This is the first day of beta2 behaviour
+
+
+
+beta1_fitted = 0.2631;
+beta2_fitted = 0.1670;
+
+
+% Step 5: Simulate admissions with fitted betas
+% Using the new function structure
+adm_fit = simulate_sir1(beta1_fitted, beta2_fitted, ...
+    lockdown_day_index, gamma, S0, I0, R0, N, num_total_days);
+
+% Step 6: Plot
+figure;
+bar(all_dates_plot, admissions_full, 'FaceColor', [0.7 0.7 0.9], 'EdgeColor', 'none', 'DisplayName', 'Reported Admissions');
+hold on;
+plot(all_dates_plot, adm_fit, 'r', 'LineWidth', 2, 'DisplayName', 'SIR Model Predicted Admissions');
+hold off;
+
+xlim([start_date, end_date]);
+xlabel('Date');
+ylabel('New Hospital Admissions per Day');
+      
+legend('Location', 'NorthEast');
+datetick('x', 'mmm dd', 'keeplimits');
+grid off;
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+%% deaths two betas 30/5
+
+
+% Step 1
+filename = 'england deaths nation_newDailyNsoDeathsByDeathDate.csv.xlsx';
+data = readtable(filename);
+dates = datetime(data.date);
+deaths = data.value;
+
+% Date range from Jan 1 to July 19, 2020
+start_date = datetime('2020-01-01');
+end_date = datetime('2020-07-19');
+all_dates = (start_date:end_date)';
+deaths_full = zeros(length(all_dates),1);
+
+% Filling in available data
+[~, idx] = ismember(dates, all_dates);
+valid_idx = idx > 0;
+deaths_full(idx(valid_idx)) = deaths(valid_idx);
+
+% Defining split point (April 8, 2020)
+phase1_end = datetime('2020-04-06') - days(8); 
+lockdown_day = days(phase1_end - start_date); % Convert duration to a scalar number of days
+
+% Step 2: Set Model Parameters
+N = 56e6;           % England population
+gamma = 1/5;       % 5-day recovery period
+tau = 8;           % Death lag (days)
+rho = 0.0157;        % Infection fatality ratio
+
+% Initial conditions
+I0 = 1; R0 = 0; S0 = N - I0 - R0;
+
+% Step 3: Define SIR Simulation Function
+function daily_deaths = simulate_sir_deaths2(beta1, beta2,lockdown_day, gamma, S0, I0, R0, N, num_days, tau, rho)
+    % Simulate SIR model and convert to deaths with lag
+    y0 = [S0; I0; R0];
+    [~, y] = ode45(@(t,y) simulate_2_betas (t,y,beta1,beta2,N,lockdown_day,gamma), 0:num_days-1, y0);
+    
+    % Calculate daily removals (new R)
+    daily_removals = [gamma*I0; diff(y(:,3))];
+    
+    % Apply death lag and fatality ratio
+    if num_days > tau
+        daily_deaths = [zeros(tau,1); rho * daily_removals(1:num_days-tau)];
+    else
+        daily_deaths = zeros(num_days,1);
+    end
+end
+
+% Step 4: Fit model to upswing
+data1 = deaths_full;
+
+
+
+
+
+
+
+beta1 = 0.348715; beta2 = 0.172414;
+num_total_days = length(deaths_full);
+deaths1 = simulate_sir_deaths2(beta1, beta2, lockdown_day, gamma, S0, I0, R0, N, num_total_days, tau, rho);
+
+
+
+figure; bar(all_dates, deaths_full, 'FaceColor', [0.7 0.7 0.9], 'EdgeColor', 'none');
+hold on; plot(deaths1, 'r', 'LineWidth', 2, 'DisplayName', 'SIR Model')
+xlabel('Date');
+ylabel('Daily Deaths');
+legend('Reported Deaths', 'SIR Model (Rising)', 'SIR Model (Declining)', 'Location', 'best');
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+%%cases with three beta values%%
+filename = 'england cases nation_newCasesBySpecimenDate.csv.xlsx';
+data = readtable(filename, 'Sheet', 'nation_newCasesBySpecimenDate');
+dates = datetime(data.date);
+new_cases = data.value;
+
+start_date = datetime('2020-01-01');
+% 3 betas, so extend the end date
+end_date = datetime('2020-11-02');
+all_dates = (start_date:end_date)';
+new_cases_full = zeros(length(all_dates), 1);
+[~, idx_in_all] = ismember(dates, all_dates);
+new_cases_full(idx_in_all(idx_in_all > 0)) = new_cases(idx_in_all > 0);
+
+% Defining split point (April 8, 2020)
+phase1_end = datetime('2020-04-17');
+lockdown_day = days(phase1_end - start_date); % convert duration to scalar number of days
+
+% Defining split point 2 (August 31, 2020)
+phase2_end = datetime('2020-07-01');
+lockdown_day2 = days(phase2_end - start_date); % convert duration to scalar number of days
+
+
+N = 56000000; % England population
+I0 = 1; R0 = 0; S0 = N - I0 - R0;
+gamma = 0.2;
+
+
+num_days = length(all_dates);
+data1 = new_cases_full;
+
+beta_guess = 0.5; 
+% Objective function for cases
+objective1 = @(params) simulate_sir_3betas(params(1), params(2), params(3), lockdown_day, lockdown_day2, gamma, S0, I0, R0, N, num_days) - data1;
+
+% OptimiSe beta1 and beta2
+params = fminsearch(@(beta) sum(objective1(beta).^2), [0.3, 0.1, 0.3]);
+beta1_cases = params(1); beta2_cases = params(2); beta3_cases = params(3);
+
+fprintf('Beta1 (Cases): %f\nBeta2 (Cases): %f\nBeta3 (Cases): %f\n', beta1_cases, beta2_cases, beta3_cases);
+
+% Simulate with fitted betas
+model1 = simulate_sir_3betas(beta1_cases, beta2_cases, beta3_cases, lockdown_day, lockdown_day2, gamma, S0, I0, R0, N, num_days);
+
+
+% Plotting
+figure;
+bar(all_dates, new_cases_full, 'FaceColor', [0.7 0.7 0.9], 'EdgeColor', 'none'); % Data
+hold on;
+plot(all_dates, model1, 'r', 'LineWidth', 2, 'DisplayName', 'SIR Model');
+
+hold off;
+xlabel('Date');
+ylabel('New COVID-19 Cases per Day');
+title('COVID-19 New Cases in England: Three-Phase SIR Model Fit');
+legend('Reported Data', 'SIR Model');
+xlim([start_date, end_date]);
+ylim([0 25000]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+
+function new_cases = simulate_sir_3betas(beta1_cases, beta2_cases, beta3_cases, lockdown_day, lockdown_day2, gamma, S0, I0, R0, N, num_days)
+if lockdown_day >= lockdown_day2 && lockdown_day2 <= num_days && lockdown_day <= num_days
+    warning('lockdown_day2 should be after lockdown_day. Results may not be as expected.');
+    
+end
+    if lockdown_day > num_days && lockdown_day2 <= num_days
+        warning('lockdown_day is after num_days, but lockdown_day2 is not. beta2 phase might be skipped.');
+    
+    end
+
+    % Simulate SIR model and convert to deaths with lag
+    y0 = [S0; I0; R0];
+    [~, y] = ode45(@(t,y) simulate_3_betas(t,y,beta1_cases,beta2_cases,beta3_cases,N,lockdown_day,lockdown_day2,gamma), 0:num_days-1, y0);
+    
+    % Calculate daily cases (new I)
+    new_cases = [beta1_cases*I0; diff(cumsum(y(:,2)))];
+end
+
+    
+
+function output = simulate_3_betas(t,y,beta1_cases,beta2_cases,beta3_cases,N,lockdown_day,lockdown_day2,gamma)
+if t < lockdown_day
+    % Phase 1: Before lockdown
+    current_beta = beta1_cases;
+elseif t >= lockdown_day && t < lockdown_day2
+    % Phase 2: During lockdown
+    current_beta = beta2_cases;
+else % t >= lockdown_day2
+    % Phase 3: After restrictions are lifted
+    current_beta = beta3_cases;
+end
+    output = [-current_beta*y(1)*y(2)/N; current_beta*y(1)*y(2)/N - gamma*y(2); gamma*y(2)];
+
+end
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% admissions with three beta values%%
+
+filename = 'england healthcare nation_newAdmissions.csv.xlsx';
+data = readtable(filename, 'Sheet', 'nation_newAdmissions');
+dates = datetime(data.date);
+admissions = data.value;
+
+start_date = datetime('2020-01-01');
+end_date = datetime('2020-11-11'); % Need to show decline
+all_dates = (start_date:end_date)';
+admissions_full = zeros(length(all_dates),1);
+[~, idx] = ismember(dates, all_dates);
+valid_idx = idx > 0;
+admissions_full(idx(valid_idx)) = admissions(valid_idx);
+
+
+%model parameters
+N = 56000000; % England population 
+gamma = 1/5; % 5-day recovery period
+I0 = 1; R0 = 0; S0 = N - I0 - R0;
+% Set lockdown date (e.g., 8 days before April 1)
+phase2_start_date = datetime('2020-04-01'); % Start of lockdown/downcurve
+phase3_start_date = datetime('2020-08-02'); % Start of restrictions lifting/second upswing
+lockdown_day = days(phase2_start_date - start_date);
+lockdown_day2 = days(phase3_start_date - start_date);
+
+% Ensure lockdown_day2 is after lockdown_day
+if lockdown_day2 <= lockdown_day
+    warning('Phase 3 start date must be after Phase 2 start date. Adjusting lockdown_day2.');
+    lockdown_day2 = lockdown_day + 1; 
+end
+
+
+
+
+num_simulation_days = length(all_dates);
+data1 = admissions_full;
+
+
+beta1_adm = 0.287082;   
+beta2_adm = 0.169216;  
+beta3_adm = 0.232222; 
+
+fprintf('Fitted Beta Values:\nBeta1: %f\nBeta2: %f\nBeta3: %f\n', beta1_adm, beta2_adm, beta3_adm);
+
+% Simulate admissions with fitted betas
+adm_fit = simulate_sir_3betas(beta1_adm, beta2_adm, beta3_adm, lockdown_day, lockdown_day2, gamma, S0, I0, R0, N, num_simulation_days);
+
+
+% Plot
+figure;
+bar(all_dates, admissions_full, 'FaceColor', [0.7 0.7 0.9], 'EdgeColor', 'none');
+hold on;
+plot(all_dates, adm_fit, 'r', 'LineWidth', 2);
+hold off;
+
+xlim([start_date, end_date]);
+xlabel('Date');
+ylabel('Daily Admissions');
+title('COVID-19 Daily Admissions in England: Three-Phase SIR Model');
+legend('Reported Admissions', 'SIR Model Fit', 'Location', 'northwest');
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks'); 
+grid off;
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% deaths three betas 30/5
+
+
+% Step 1
+filename = 'england deaths nation_newDailyNsoDeathsByDeathDate.csv.xlsx';
+data = readtable(filename);
+dates = datetime(data.date);
+deaths = data.value;
+
+% Date range from Jan 1 to July 19, 2020
+start_date = datetime('2020-01-01');
+end_date = datetime('2020-11-09');
+all_dates = (start_date:end_date)';
+deaths_full = zeros(length(all_dates),1);
+
+
+[~, idx] = ismember(dates, all_dates);
+valid_idx = idx > 0;
+deaths_full(idx(valid_idx)) = deaths(valid_idx);
+
+% Defining split point (April 8, 2020)
+phase2_start_date = datetime('2020-03-30'); % Start of lockdown/downcurve
+phase3_start_date = datetime('2020-08-09'); % Start of restrictions lifting/second upswing
+lockdown_day = days(phase2_start_date - start_date);
+lockdown_day2 = days(phase3_start_date - start_date);
+
+lockdown_day1_numeric = days(phase2_start_date - start_date); % End of beta1, start of beta2
+lockdown_day2_numeric = days(phase3_start_date - start_date); % End of beta2, start of beta3
+
+% Step 2: Set Model Parameters
+N = 56e6;           % England population
+gamma = 1/5;       % 5-day recovery period
+tau = 8;           % Death lag (days)
+rho = 0.0157;        % Infection fatality ratio
+
+% Step 4: Fit model
+num_total_days = length(deaths_full);
+data_to_fit = deaths_full;
+
+% Initial conditions
+I0 = 1; R0 = 0; S0 = N - I0 - R0;
+
+% Objective function 
+objective_3beta = @(params) simulate_sir_deaths_3phases(params(1), params(2), params(3), lockdown_day1_numeric, lockdown_day2_numeric,gamma, S0, I0, R0, N, num_total_days, tau, rho) - data_to_fit;
+
+options = optimset('MaxFunEvals', 3000, 'MaxIter', 1500, 'Display','iter'); 
+initial_guess_3betas = [0.3, 0.2, 0.3]; % Initial guess for beta1, beta2, beta3
+
+fitted_params_3beta = fminsearch(@(b) sum(objective_3beta(b).^2), initial_guess_3betas, options);
+
+beta1_fitted = fitted_params_3beta(1);
+beta2_fitted = fitted_params_3beta(2);
+beta3_fitted = fitted_params_3beta(3);
+
+fprintf('Fitted Beta1: %f\nFitted Beta2: %f\nFitted Beta3: %f\n', beta1_fitted, beta2_fitted, beta3_fitted);
+
+% Simulate with fitted parameters for plotting
+model_deaths_fitted_3beta = simulate_sir_deaths_3phases(beta1_fitted, beta2_fitted, beta3_fitted, ...
+    lockdown_day1_numeric, lockdown_day2_numeric, ...
+    gamma, S0, I0, R0, N, num_total_days, tau, rho);
+
+% Plotting
+figure;
+bar(all_dates, deaths_full, 'FaceColor', [0.7 0.7 0.9], 'EdgeColor', 'none', 'DisplayName', 'Reported Deaths');
+hold on;
+plot(all_dates, model_deaths_fitted_3beta, 'r', 'LineWidth', 2, 'DisplayName', 'SIR Model Fit (3 Phases)');
+hold off;
+
+xlabel('Date');
+ylabel('Daily Deaths');
+title(['COVID-19 Daily Deaths: Three-Phase SIR Model (Lag: ', num2str(tau), ' days, IFR: ', num2str(rho*100), '%)']);
+legend('show', 'Location', 'northeast');
+xlim([start_date, end_date]);
+datetick('x', 'mmm dd', 'keeplimits');
+grid off;
+
+
+%  Function 
+
+function daily_deaths = simulate_sir_deaths_3phases(beta1_sim, beta2_sim, beta3_sim, lockdown_day1_sim, lockdown_day2_sim, gamma_sim, S0_sim, I0_sim, R0_sim, N_sim, num_days_sim, tau_sim, rho_sim)
+    y0_sim = [S0_sim; I0_sim; R0_sim];
+    t_span_sim = 0:num_days_sim-1;
+
+    % 3-phase SIR ODE function
+    [~, y_sir_solution] = ode45(@(t,y_ode) sir_change_beta_3phases(t, y_ode, ...
+                                                              beta1_sim, beta2_sim, beta3_sim, ...
+                                                              N_sim, lockdown_day1_sim, lockdown_day2_sim, ...
+                                                              gamma_sim), t_span_sim, y0_sim);
+
+    %  daily removals (new R)
+    daily_removals_calc = zeros(num_days_sim,1);
+    if size(y_sir_solution,1) >= 2
+        new_R_values = diff(y_sir_solution(:,3));
+        % The first day's removals are set based on I0
+        daily_removals_calc(1) = gamma_sim * I0_sim; % Approximation for day 0 (t_span_sim(1))
+        if num_days_sim > 1
+             daily_removals_calc(2:min(num_days_sim, length(new_R_values)+1)) = new_R_values(1:min(num_days_sim-1, length(new_R_values)));
+        end
+    elseif size(y_sir_solution,1) == 1 && num_days_sim ==1 
+        daily_removals_calc(1) = gamma_sim * I0_sim;
+    end
+    
+    daily_removals_calc = max(0, daily_removals_calc); % To ensure no negative removals
+
+    % Incorporating death lag and fatality ratio
+    daily_deaths = zeros(num_days_sim,1);
+    if num_days_sim > tau_sim
+        valid_indices_removals = 1:(num_days_sim-tau_sim);
+        daily_deaths((tau_sim+1):num_days_sim) = rho_sim * daily_removals_calc(valid_indices_removals);
+    end
+    daily_deaths = reshape(daily_deaths, [], 1); 
+end
+
+function dydt = sir_change_beta_3phases(t_ode, y_ode, ...
+                                    beta1_fn, beta2_fn, beta3_fn, ...
+                                    N_fn, lockdown_day1_fn, lockdown_day2_fn, ...
+                                    gamma_fn)
+    current_beta_val = beta1_fn; % Default to beta1
+    if t_ode > lockdown_day1_fn && t_ode <= lockdown_day2_fn % Phase 2
+        current_beta_val = beta2_fn;
+    elseif t_ode > lockdown_day2_fn % Phase 3
+        current_beta_val = beta3_fn;
+    end
+    
+
+    S_val = y_ode(1);
+    I_val = y_ode(2);
+
+    dSdt = -current_beta_val * S_val * I_val / N_fn;
+    dIdt =  current_beta_val * S_val * I_val / N_fn - gamma_fn * I_val;
+    dRdt =  gamma_fn * I_val;
+    dydt = [dSdt; dIdt; dRdt];
+    dydt = reshape(dydt,3,1);
+end
+%%
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% cases if lockdown was 7 days earlier%%
+filename = 'england cases nation_newCasesBySpecimenDate.csv.xlsx';
+
+
+dates_reported = datetime(data.date);
+new_cases_reported = data.value;
+
+start_date_sim = datetime('2020-01-01');
+end_date_sim = datetime('2020-12-02'); 
+all_dates_sim = (start_date_sim:end_date_sim)';
+num_days_simulation = length(all_dates_sim);
+
+reported_cases_full_series = zeros(num_days_simulation, 1);
+[~, idx_in_all] = ismember(dates_reported, all_dates_sim);
+
+valid_data_indices_in_reported = idx_in_all > 0;
+corresponding_indices_in_full_series = idx_in_all(valid_data_indices_in_reported);
+reported_cases_full_series(corresponding_indices_in_full_series) = new_cases_reported(valid_data_indices_in_reported);
+reported_cases_full_series(isnan(reported_cases_full_series)) = 0; 
+
+N = 56000000; % England population
+I0_cases = 1; 
+R0_cases = 0; 
+S0_cases = N - I0_cases - R0_cases; 
+gamma_cases = 0.2;
+
+% Fitted beta values 
+beta1_fitted_cases = 0.284866;   
+beta2_fitted_cases = 0.112748;  
+beta3_fitted_cases = 0.262636;
+
+
+fprintf('Beta1 (Cases): %f\nBeta2 (Cases): %f\nBeta3 (Cases): %f\n', beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases);
+
+% Original Lockdown Dates
+original_phase2_start_cases_date = datetime('2020-04-17');
+original_phase3_start_cases_date = datetime('2020-07-01');
+
+% Converting dates 
+original_lockdown_day1_cases_numeric = days(original_phase2_start_cases_date - start_date_sim);
+original_lockdown_day2_cases_numeric = days(original_phase3_start_cases_date - start_date_sim);
+
+fprintf('Original Phase 2 Start (Beta2) on day: %d\n', original_lockdown_day1_cases_numeric);
+fprintf('Original Phase 3 Start (Beta3) on day: %d\n', original_lockdown_day2_cases_numeric);
+
+% Simulating Original Lockdown Scenario
+disp('Simulating original lockdown scenario...');
+original_model_cases = simulate_sir_3betas(beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases, ...
+                                           original_lockdown_day1_cases_numeric, original_lockdown_day2_cases_numeric, ...
+                                           gamma_cases, S0_cases, I0_cases, R0_cases, N, num_days_simulation);
+disp('Original scenario simulation complete.');
+
+% Defining Earlier Lockdown Dates 
+disp('Defining counterfactual (earlier) lockdown dates...');
+days_to_shift = 7;
+counterfactual_phase2_start_date_cases = original_phase2_start_cases_date - days(days_to_shift);
+% Shifting the start of phase 3 consistently with phase 2
+
+counterfactual_phase3_start_date_cases = original_phase3_start_cases_date - days(days_to_shift); 
+
+cf_lockdown_day1_cases_numeric = days(counterfactual_phase2_start_date_cases - start_date_sim);
+cf_lockdown_day2_cases_numeric = days(counterfactual_phase3_start_date_cases - start_date_sim);
+
+fprintf('Counterfactual Phase 2 Start Date: %s (Day %d)\n', datestr(counterfactual_phase2_start_date_cases), cf_lockdown_day1_cases_numeric);
+fprintf('Counterfactual Phase 3 Start Date: %s (Day %d)\n', datestr(counterfactual_phase3_start_date_cases), cf_lockdown_day2_cases_numeric);
+
+% Simulating Counterfactual Earlier Scenario
+disp('Simulating counterfactual (earlier lockdown) scenario...');
+cf_model_cases = simulate_sir_3betas(beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases, ...
+                                     cf_lockdown_day1_cases_numeric, cf_lockdown_day2_cases_numeric, ...
+                                     gamma_cases, S0_cases, I0_cases, R0_cases, N, num_days_simulation);
+disp('Counterfactual scenario simulation complete.');
+
+% Plot
+disp('Plotting results...');
+figure('Name', 'Counterfactual Analysis: Cases - Earlier Lockdown');
+bar(all_dates_sim, reported_cases_full_series, 'FaceColor', [0.8 0.8 0.8], 'EdgeColor', 'none', 'DisplayName', 'Reported Cases');
+hold on;
+plot(all_dates_sim, original_model_cases, 'r-', 'LineWidth', 2, 'DisplayName', 'Original SIR Model');
+plot(all_dates_sim, cf_model_cases, 'b--', 'LineWidth', 2, 'DisplayName', ['Lockdown ', num2str(days_to_shift), ' Days Earlier Model']);
+
+hold off;
+xlabel('Date');
+ylabel('New Cases per Day');
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim, end_date_sim]);
+
+ylim([0, 30000]); 
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+% Analysis
+peak_original_cases = max(original_model_cases);
+peak_cf_cases = max(cf_model_cases);
+total_original_cases = sum(original_model_cases); % adding daily new cases
+total_cf_cases = sum(cf_model_cases);
+
+fprintf('\n--- Quantitative Comparison for Cases ---\n');
+fprintf('Peak Daily Cases (Original Model): %.0f\n', peak_original_cases);
+fprintf('Peak Daily Cases (Earlier Lockdown Model): %.0f\n', peak_cf_cases);
+if peak_original_cases > 0
+    fprintf('Reduction in Peak Daily Cases: %.0f (%.2f%%)\n', peak_original_cases - peak_cf_cases, (1 - peak_cf_cases/peak_original_cases)*100);
+else
+    fprintf('Reduction in Peak Daily Cases: %.0f (N/A %% due to zero original peak)\n', peak_original_cases - peak_cf_cases);
+end
+
+fprintf('Total Cases (Original Model): %.0f\n', total_original_cases);
+fprintf('Total Cases (Earlier Lockdown Model): %.0f\n', total_cf_cases);
+if total_original_cases > 0
+    fprintf('Reduction in Total Cases: %.0f (%.2f%%)\n', total_original_cases - total_cf_cases, (1 - total_cf_cases/total_original_cases)*100);
+else
+    fprintf('Reduction in Total Cases: %.0f (N/A %% due to zero original total)\n', total_original_cases - total_cf_cases);
+end
+
+%Function Definition for SIR Simulation with 3 Beta Values using ode45
+
+
+function daily_new_cases = simulate_sir_3betas1(beta1, beta2, beta3, ...
+                                             lockdown_day1_numeric, lockdown_day2_numeric, ...
+                                             gamma_val, S_initial, I_initial, R_initial, N_population, num_simulation_days)
+    
+    % --- Nested ODE  ---
+  
+    function dydt = sir_odes_three_betas(t, y)
+        S_current = y(1);
+        I_current = y(2);
+        % R_current = y(3); % Not directly used for dS, dI equations
+
+       
+        % lockdown_day1_numeric is the first day (0-indexed) when beta2 applies
+        % lockdown_day2_numeric is the first day (0-indexed) when beta3 applies
+        current_beta = 0;
+        if t < lockdown_day1_numeric
+            current_beta = beta1;       % Phase 1
+        elseif t >= lockdown_day1_numeric && t < lockdown_day2_numeric
+            current_beta = beta2;       % Phase 2 (e.g., lockdown)
+        else % t >= lockdown_day2_numeric
+            current_beta = beta3;       % Phase 3
+        end
+        
+        dSdt = -current_beta * S_current * I_current / N_population;
+        dIdt =  current_beta * S_current * I_current / N_population - gamma_val * I_current;
+        dRdt =  gamma_val * I_current;
+        
+        dydt = [dSdt; dIdt; dRdt];
+    end
+   
+
+    % Initial conditions vector for the ODE solver
+    y0 = [S_initial; I_initial; R_initial];
+
+    t_span = 0:num_simulation_days; % Goes from t=0 to t=num_simulation_days
+
+    % ODE solver options 
+    options = odeset('RelTol', 1e-6, 'AbsTol', 1e-6, 'NonNegative', [1,2,3]);
+
+    % Solve the ODEs
+    [~, solution_ode] = ode45(@sir_odes_three_betas, t_span, y0, options);
+
+    S_values_over_time = solution_ode(:,1); 
+
+    if length(S_values_over_time) > 1
+        daily_new_cases = S_values_over_time(1:end-1) - S_values_over_time(2:end);
+    else % Should not happen if num_simulation_days >= 1
+        daily_new_cases = zeros(num_simulation_days, 1); 
+    end
+    
+  
+    if length(daily_new_cases) > num_simulation_days
+        daily_new_cases = daily_new_cases(1:num_simulation_days);
+    elseif length(daily_new_cases) < num_simulation_days && num_simulation_days > 0
+        % This case implies S_values_over_time was too short, which shouldn't happen with t_span = 0:num_simulation_days
+        temp_cases = zeros(num_simulation_days,1);
+        temp_cases(1:length(daily_new_cases)) = daily_new_cases;
+        daily_new_cases = temp_cases;
+    elseif num_simulation_days == 0
+        daily_new_cases = [];
+    end
+
+
+    % Ensure no negative values due to numerical artifacts
+    daily_new_cases = max(0, daily_new_cases);
+
+    %  Warnings for lockdown day logic
+    if lockdown_day1_numeric >= lockdown_day2_numeric && (lockdown_day2_numeric < num_simulation_days)
+        % This means phase 2 starts on or after phase 3 starts, and phase 3 is relevant.
+        warning('Lockdown Day 2 (day %.0f) is not after Lockdown Day 1 (day %.0f). Phase 3 might effectively override Phase 2 or cause unexpected beta sequence.', lockdown_day2_numeric, lockdown_day1_numeric);
+    end
+
+    if lockdown_day1_numeric >= num_simulation_days
+        % Beta1 applies for the entire simulation period because Phase 2 starts too late.
+        warning('Lockdown Day 1 (day %.0f) is on or after the simulation ends (total days: %.0f). Beta1 will apply for the whole period.', lockdown_day1_numeric, num_simulation_days);
+    elseif lockdown_day2_numeric >= num_simulation_days && lockdown_day1_numeric < num_simulation_days
+        % Beta1 then Beta2 apply, but Beta3 phase doesn't start within simulation period.
+        warning('Lockdown Day 2 (day %.0f) for start of Beta3 is on or after simulation ends (total days: %.0f). Model will only use Beta1 and Beta2.', lockdown_day2_numeric, num_simulation_days);
+    end
+end
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+%% admissions if lockdown occured 7 days earlier%%
+
+filename = 'england healthcare nation_newAdmissions.csv.xlsx';
+data = readtable(filename, 'Sheet', 'nation_newAdmissions');
+dates_reported_adm = datetime(data.date);
+admissions_reported_values = data.value;
+
+start_date_sim_adm = datetime('2020-01-01');
+end_date_sim_adm = datetime('2020-11-23'); 
+all_dates_sim_adm = (start_date_sim_adm:end_date_sim_adm)';
+num_days_simulation_adm = length(all_dates_sim_adm);
+
+reported_admissions_full_series = zeros(num_days_simulation_adm, 1);
+[~, idx_in_all_adm] = ismember(dates_reported_adm, all_dates_sim_adm);
+valid_idx_reported_adm = idx_in_all_adm(idx_in_all_adm > 0);
+reported_admissions_full_series(valid_idx_reported_adm) = admissions_reported_values(idx_in_all_adm > 0);
+reported_admissions_full_series(isnan(reported_admissions_full_series)) = 0;
+
+disp('Admissions data preparation complete.');
+
+% Original model parameters for admissions
+
+N_adm = 56000000;
+gamma_adm = 1/5;
+I0_adm = 1; 
+R0_adm = 0;
+S0_adm = N_adm - I0_adm - R0_adm;
+
+beta1_fitted_adm = 0.287082;   
+beta2_fitted_adm = 0.169216;  
+beta3_fitted_adm = 0.232222; 
+
+fprintf('Beta1 (Admissions): %f\nBeta2 (Admissions): %f\nBeta3 (Admissions): %f\n', beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm);
+
+% Original lockdown dates from admissions 
+original_phase2_start_date_adm = datetime('2020-04-01');
+original_phase3_start_date_adm = datetime('2020-08-02');
+
+original_lockdown_day1_adm_numeric = days(original_phase2_start_date_adm - start_date_sim_adm);
+original_lockdown_day2_adm_numeric = days(original_phase3_start_date_adm - start_date_sim_adm);
+
+disp('Original parameters and dates for admissions defined.');
+
+% Original Lockdown Scenario for Admissions (using fitted parameters)
+disp('Simulating original lockdown scenario for admissions...');
+original_model_admissions = simulate_sir_3betas(beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm, ...
+                                                original_lockdown_day1_adm_numeric, original_lockdown_day2_adm_numeric, ...
+                                                gamma_adm, S0_adm, I0_adm, R0_adm, N_adm, num_days_simulation_adm);
+disp('Original admissions scenario simulation complete.');
+
+% Defining Counterfactual Lockdown Dates for Admissions 
+disp('Defining counterfactual (earlier) lockdown dates for admissions...');
+days_to_shift_adm = 7;
+counterfactual_phase2_start_date_adm = original_phase2_start_date_adm - days(days_to_shift_adm);
+counterfactual_phase3_start_date_adm = original_phase3_start_date_adm - days(days_to_shift_adm);
+
+cf_lockdown_day1_adm_numeric = days(counterfactual_phase2_start_date_adm - start_date_sim_adm);
+cf_lockdown_day2_adm_numeric = days(counterfactual_phase3_start_date_adm - start_date_sim_adm);
+
+fprintf('Counterfactual Phase 2 Start Date (Admissions): %s (Day %d)\n', datestr(counterfactual_phase2_start_date_adm), cf_lockdown_day1_adm_numeric);
+fprintf('Counterfactual Phase 3 Start Date (Admissions): %s (Day %d)\n', datestr(counterfactual_phase3_start_date_adm), cf_lockdown_day2_adm_numeric);
+
+% Simulating Counterfactual Lockdown Scenario for Admissions
+disp('Simulating counterfactual (earlier) lockdown scenario for admissions...');
+cf_model_admissions = simulate_sir_3betas(beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm, ...
+                                          cf_lockdown_day1_adm_numeric, cf_lockdown_day2_adm_numeric, ...
+                                          gamma_adm, S0_adm, I0_adm, R0_adm, N_adm, num_days_simulation_adm);
+disp('Counterfactual admissions scenario simulation complete.');
+
+% Plot
+disp('Plotting admissions results...');
+figure('Name', 'Counterfactual Analysis: Admissions - Earlier Lockdown');
+bar(all_dates_sim_adm, reported_admissions_full_series, 'FaceColor', [0.7 0.85 0.7], 'EdgeColor', 'none', 'DisplayName', 'Reported Admissions'); 
+hold on;
+plot(all_dates_sim_adm, original_model_admissions, 'b-', 'LineWidth', 2, 'DisplayName', 'Original SIR Model (Admissions)');
+plot(all_dates_sim_adm, cf_model_admissions, 'm--', 'LineWidth', 2, 'DisplayName', ['Lockdown ', num2str(days_to_shift_adm), ' Days Earlier Model (Admissions)']); 
+
+
+
+hold off;
+xlabel('Date');
+ylabel('New Hospital Admissions per Day');
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim_adm, end_date_sim_adm]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+% Quantitative Comparison 
+peak_original_admissions = max(original_model_admissions);
+peak_cf_admissions = max(cf_model_admissions);
+total_original_admissions = sum(original_model_admissions);
+total_cf_admissions = sum(cf_model_admissions);
+
+fprintf('\n--- Quantitative Comparison for Admissions ---\n');
+fprintf('Peak Admissions (Original Model): %.0f\n', peak_original_admissions);
+fprintf('Peak Admissions (Earlier Lockdown Model): %.0f\n', peak_cf_admissions);
+if peak_original_admissions > 0
+    fprintf('Reduction in Peak Admissions: %.0f (%.2f%%)\n', peak_original_admissions - peak_cf_admissions, (1 - peak_cf_admissions/peak_original_admissions)*100);
+else
+    fprintf('Reduction in Peak Admissions: %.0f\n', peak_original_admissions - peak_cf_admissions);
+end
+
+fprintf('Total Admissions (Original Model): %.0f\n', total_original_admissions);
+fprintf('Total Admissions (Earlier Lockdown Model): %.0f\n', total_cf_admissions);
+if total_original_admissions > 0
+    fprintf('Reduction in Total Admissions: %.0f (%.2f%%)\n', total_original_admissions - total_cf_admissions, (1 - total_cf_admissions/total_original_admissions)*100);
+else
+    fprintf('Reduction in Total Admissions: %.0f\n', total_original_admissions - total_cf_admissions);
+end
+
+disp('Counterfactual analysis for admissions complete.');
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% deaths if england locked down 7 days earlier
+disp('Starting Counterfactual Analysis for Deaths...');
+
+disp('Loading and preparing death data...');
+filename = 'england deaths nation_newDailyNsoDeathsByDeathDate.csv.xlsx';
+
+
+data = readtable(filename);
+dates_reported_deaths = datetime(data.date);
+deaths_reported_values = data.value;
+
+start_date_sim_deaths = datetime('2020-01-01');
+end_date_sim_deaths = datetime('2020-11-12'); 
+all_dates_sim_deaths = (start_date_sim_deaths:end_date_sim_deaths)';
+num_days_simulation_deaths = length(all_dates_sim_deaths);
+
+reported_deaths_full_series = zeros(num_days_simulation_deaths, 1);
+[~, idx_in_all_deaths] = ismember(dates_reported_deaths, all_dates_sim_deaths);
+valid_idx_reported_deaths = idx_in_all_deaths(idx_in_all_deaths > 0);
+reported_deaths_full_series(valid_idx_reported_deaths) = deaths_reported_values(idx_in_all_deaths > 0);
+reported_deaths_full_series(isnan(reported_deaths_full_series)) = 0;
+
+disp('Death data preparation complete.');
+
+%Original Model Parameters and Lockdown Dates 
+disp('Defining original model parameters for deaths...');
+
+N_deaths = 56e6;
+gamma_deaths = 1/5;  
+tau_deaths = 2;
+rho_deaths = 0.0157;
+I0_deaths = 1;      
+R0_deaths = 0;
+S0_deaths = N_deaths - I0_deaths - R0_deaths;
+
+beta1_fitted_val_deaths = 0.3341;  
+beta2_fitted_val_deaths = 0.1568;  
+beta3_fitted_val_deaths = 0.3119;  
+disp('USING THE FOLLOWING FITTED BETA VALUES FOR DEATHS (ensure these are correct and produced a good 3-phase fit):');
+fprintf('Beta1 (Deaths): %f\nBeta2 (Deaths): %f\nBeta3 (Deaths): %f\n', beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths);
+
+% Original lockdown dates from deaths 
+original_phase2_start_date_deaths = datetime('2020-04-08');
+original_phase3_start_date_deaths = datetime('2020-08-31');
+
+original_lockdown_day1_deaths_numeric = days(original_phase2_start_date_deaths - start_date_sim_deaths);
+original_lockdown_day2_deaths_numeric = days(original_phase3_start_date_deaths - start_date_sim_deaths);
+
+disp('Original parameters and dates for deaths defined.');
+
+% Original Lockdown Scenario for Deaths (using fitted parameters) 
+disp('Simulating original lockdown scenario for deaths...');
+original_model_deaths = simulate_sir_deaths_3phases(beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths, ...
+                                                original_lockdown_day1_deaths_numeric, original_lockdown_day2_deaths_numeric, ...
+                                                gamma_deaths, S0_deaths, I0_deaths, R0_deaths, N_deaths, ...
+                                                num_days_simulation_deaths, tau_deaths, rho_deaths);
+disp('Original deaths scenario simulation complete.');
+
+%  Counterfactual (Earlier) Lockdown Dates for Deaths 
+disp('Defining counterfactual (earlier) lockdown dates for deaths...');
+days_to_shift_deaths = 7;
+counterfactual_phase2_start_date_deaths = original_phase2_start_date_deaths - days(days_to_shift_deaths);
+counterfactual_phase3_start_date_deaths = original_phase3_start_date_deaths - days(days_to_shift_deaths);
+
+cf_lockdown_day1_deaths_numeric = days(counterfactual_phase2_start_date_deaths - start_date_sim_deaths);
+cf_lockdown_day2_deaths_numeric = days(counterfactual_phase3_start_date_deaths - start_date_sim_deaths);
+
+fprintf('Counterfactual Phase 2 Start Date (Deaths): %s (Day %d)\n', datestr(counterfactual_phase2_start_date_deaths), cf_lockdown_day1_deaths_numeric);
+fprintf('Counterfactual Phase 3 Start Date (Deaths): %s (Day %d)\n', datestr(counterfactual_phase3_start_date_deaths), cf_lockdown_day2_deaths_numeric);
+
+%  Counterfactual (Earlier) Lockdown Scenario for Deaths 
+disp('Simulating counterfactual (earlier) lockdown scenario for deaths...');
+cf_model_deaths = simulate_sir_deaths_3phases(beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths, ...
+                                          cf_lockdown_day1_deaths_numeric, cf_lockdown_day2_deaths_numeric, ...
+                                          gamma_deaths, S0_deaths, I0_deaths, R0_deaths, N_deaths, ...
+                                          num_days_simulation_deaths, tau_deaths, rho_deaths);
+disp('Counterfactual deaths scenario simulation complete.');
+
+%  Plot 
+disp('Plotting deaths results...');
+figure('Name', 'Counterfactual Analysis: Deaths - Earlier Lockdown');
+bar(all_dates_sim_deaths, reported_deaths_full_series, 'FaceColor', [0.9 0.7 0.7], 'EdgeColor', 'none', 'DisplayName', 'Reported Deaths'); 
+hold on;
+plot(all_dates_sim_deaths, original_model_deaths, 'b-', 'LineWidth', 2, 'DisplayName', 'Original SIR Model (Deaths)');
+plot(all_dates_sim_deaths, cf_model_deaths, 'k--', 'LineWidth', 2, 'DisplayName', ['Lockdown ', num2str(days_to_shift_deaths), ' Days Earlier Model (Deaths)']); 
+
+
+
+hold off;
+xlabel('Date');
+ylabel('New Deaths per Day');
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim_deaths, end_date_sim_deaths]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+% Quantitative Comparison for Deaths 
+peak_original_deaths = max(original_model_deaths);
+peak_cf_deaths = max(cf_model_deaths);
+total_original_deaths = sum(original_model_deaths);
+total_cf_deaths = sum(cf_model_deaths);
+
+fprintf('\n--- Quantitative Comparison for Deaths ---\n');
+fprintf('Peak Deaths (Original Model): %.0f\n', peak_original_deaths);
+fprintf('Peak Deaths (Earlier Lockdown Model): %.0f\n', peak_cf_deaths);
+if peak_original_deaths > 0
+    fprintf('Reduction in Peak Deaths: %.0f (%.2f%%)\n', peak_original_deaths - peak_cf_deaths, (1 - peak_cf_deaths/peak_original_deaths)*100);
+else
+    fprintf('Reduction in Peak Deaths: %.0f\n', peak_original_deaths - peak_cf_deaths);
+end
+
+
+fprintf('Total Deaths (Original Model): %.0f\n', total_original_deaths);
+fprintf('Total Deaths (Earlier Lockdown Model): %.0f\n', total_cf_deaths);
+if total_original_deaths > 0
+    fprintf('Reduction in Total Deaths: %.0f (%.2f%%)\n', total_original_deaths - total_cf_deaths, (1 - total_cf_deaths/total_original_deaths)*100);
+else
+    fprintf('Reduction in Total Deaths: %.0f\n', total_original_deaths - total_cf_deaths);
+end
+
+
+disp('Counterfactual analysis for deaths complete.');
+%%
+
+%%cases if lockdown was 14 days earlier%%
+filename = 'england cases nation_newCasesBySpecimenDate.csv.xlsx';
+data = readtable(filename, 'Sheet', 'nation_newCasesBySpecimenDate');
+
+dates_reported = datetime(data.date);
+new_cases_reported = data.value;
+
+start_date_sim = datetime('2020-01-01');
+end_date_sim = datetime('2020-11-02'); 
+all_dates_sim = (start_date_sim:end_date_sim)';
+num_days_simulation = length(all_dates_sim);
+
+reported_cases_full_series = zeros(num_days_simulation, 1);
+[~, idx_in_all] = ismember(dates_reported, all_dates_sim);
+valid_idx_reported = idx_in_all(idx_in_all > 0);
+reported_cases_full_series(valid_idx_reported) = new_cases_reported(idx_in_all > 0);
+reported_cases_full_series(isnan(reported_cases_full_series)) = 0;
+
+N = 56000000; % England population
+I0_cases = 1; R0_cases = 0; S0_cases = N - I0 - R0; 
+gamma_cases = 0.2;
+
+
+beta1_fitted_cases = 0.284866;   
+beta2_fitted_cases = 0.112748;  
+beta3_fitted_cases = 0.262636;
+
+
+fprintf('Beta1 (Cases): %f\nBeta2 (Cases): %f\nBeta3 (Cases): %f\n', beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases);
+
+original_phase2_start_cases_date = datetime('2020-04-17');
+original_phase3_start_cases_date = datetime('2020-07-01');
+
+original_lockdown_day1_cases_numeric = days( original_phase2_start_cases_date - start_date_sim);
+original_lockdown_day2_cases_numeric = days( original_phase3_start_cases_date - start_date_sim);
+
+% Simulate Original Lockdown Scenario (using fitted parameters)
+original_model_cases = simulate_sir_3betas(beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases, ...
+                                           original_lockdown_day1_cases_numeric, original_lockdown_day2_cases_numeric, ...
+                                           gamma_cases, S0_cases, I0_cases, R0_cases, N, num_days_simulation);
+disp('Original scenario simulation complete.');
+
+%Define Earlier Lockdown Dates 
+disp('Defining counterfactual (earlier) lockdown dates...');
+days_to_shift = 14;
+counterfactual_phase2_start_date_cases = original_phase2_start_cases_date - days(days_to_shift);
+counterfactual_phase3_start_date_cases = original_phase3_start_cases_date - days(days_to_shift);
+
+cf_lockdown_day1_cases_numeric = days(counterfactual_phase2_start_date_cases - start_date_sim);
+cf_lockdown_day2_cases_numeric = days(counterfactual_phase3_start_date_cases - start_date_sim);
+
+fprintf('Counterfactual Phase 2 Start Date: %s (Day %d)\n', datestr(counterfactual_phase2_start_date_cases), cf_lockdown_day1_cases_numeric);
+fprintf('Counterfactual Phase 3 Start Date: %s (Day %d)\n', datestr(counterfactual_phase3_start_date_cases), cf_lockdown_day2_cases_numeric);
+
+% Simulate Counterfactual Earlier Scenario
+cf_model_cases = simulate_sir_3betas(beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases, ...
+                                     cf_lockdown_day1_cases_numeric, cf_lockdown_day2_cases_numeric, ...
+                                     gamma_cases, S0_cases, I0_cases, R0_cases, N, num_days_simulation);
+
+% plot
+disp('Plotting results...');
+figure('Name', 'Counterfactual Analysis: Cases - Earlier Lockdown');
+bar(all_dates_sim, reported_cases_full_series, 'FaceColor', [0.8 0.8 0.8], 'EdgeColor', 'none', 'DisplayName', 'Reported Cases');
+hold on;
+plot(all_dates_sim, original_model_cases, 'r-', 'LineWidth', 2, 'DisplayName', 'Original SIR Model');
+plot(all_dates_sim, cf_model_cases, 'b--', 'LineWidth', 2, 'DisplayName', ['Lockdown ', num2str(days_to_shift), ' Days Earlier Model']);
+
+hold off;
+xlabel('Date');
+ylabel('New Cases per Day');
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim, end_date_sim]);
+ylim([0 25000]); 
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+% Analysis
+peak_original_cases = max(original_model_cases);
+peak_cf_cases = max(cf_model_cases);
+total_original_cases = sum(original_model_cases);
+total_cf_cases = sum(cf_model_cases);
+
+fprintf('\n--- Quantitative Comparison for Cases ---\n');
+fprintf('Peak Cases (Original Model): %.0f\n', peak_original_cases);
+fprintf('Peak Cases (Earlier Lockdown Model): %.0f\n', peak_cf_cases);
+fprintf('Reduction in Peak Cases: %.0f (%.2f%%)\n', peak_original_cases - peak_cf_cases, (1 - peak_cf_cases/peak_original_cases)*100);
+
+fprintf('Total Cases (Original Model): %.0f\n', total_original_cases);
+fprintf('Total Cases (Earlier Lockdown Model): %.0f\n', total_cf_cases);
+fprintf('Reduction in Total Cases: %.0f (%.2f%%)\n', total_original_cases - total_cf_cases, (1 - total_cf_cases/total_original_cases)*100);
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% admissions if lockdown occured 14 days earlier%%
+
+filename = 'england healthcare nation_newAdmissions.csv.xlsx';
+data = readtable(filename, 'Sheet', 'nation_newAdmissions');
+dates_reported_adm = datetime(data.date);
+admissions_reported_values = data.value;
+
+start_date_sim_adm = datetime('2020-01-01');
+end_date_sim_adm = datetime('2020-11-02'); 
+all_dates_sim_adm = (start_date_sim_adm:end_date_sim_adm)';
+num_days_simulation_adm = length(all_dates_sim_adm);
+
+reported_admissions_full_series = zeros(num_days_simulation_adm, 1);
+[~, idx_in_all_adm] = ismember(dates_reported_adm, all_dates_sim_adm);
+valid_idx_reported_adm = idx_in_all_adm(idx_in_all_adm > 0);
+reported_admissions_full_series(valid_idx_reported_adm) = admissions_reported_values(idx_in_all_adm > 0);
+reported_admissions_full_series(isnan(reported_admissions_full_series)) = 0;
+
+disp('Admissions data preparation complete.');
+
+% Define Original Model Parameters and Lockdown Dates 
+disp('Defining original model parameters for admissions...');
+
+N_adm = 56000000;
+gamma_adm = 1/5;
+I0_adm = 1; 
+R0_adm = 0;
+S0_adm = N_adm - I0_adm - R0_adm;
+
+
+
+beta1_fitted_adm = 0.287082;   
+beta2_fitted_adm = 0.169216;  
+beta3_fitted_adm = 0.232222;   
+ 
+
+fprintf('Beta1 (Admissions): %f\nBeta2 (Admissions): %f\nBeta3 (Admissions): %f\n', beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm);
+
+% Original lockdown dates from admissions 
+original_phase2_start_date_adm = datetime('2020-04-01');
+original_phase3_start_date_adm = datetime('2020-08-02');
+
+original_lockdown_day1_adm_numeric = days(original_phase2_start_date_adm - start_date_sim_adm);
+original_lockdown_day2_adm_numeric = days(original_phase3_start_date_adm - start_date_sim_adm);
+
+disp('Original parameters and dates for admissions defined.');
+
+%Original Lockdown Scenario for Admissions (using fitted parameters) 
+disp('Simulating original lockdown scenario for admissions...');
+original_model_admissions = simulate_sir_3betas(beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm, ...
+                                                original_lockdown_day1_adm_numeric, original_lockdown_day2_adm_numeric, ...
+                                                gamma_adm, S0_adm, I0_adm, R0_adm, N_adm, num_days_simulation_adm);
+disp('Original admissions scenario simulation complete.');
+
+%Counterfactual (Earlier) Lockdown Dates for Admissions ---
+disp('Defining counterfactual (earlier) lockdown dates for admissions...');
+days_to_shift_adm = 14;
+counterfactual_phase2_start_date_adm = original_phase2_start_date_adm - days(days_to_shift_adm);
+counterfactual_phase3_start_date_adm = original_phase3_start_date_adm - days(days_to_shift_adm);
+
+cf_lockdown_day1_adm_numeric = days(counterfactual_phase2_start_date_adm - start_date_sim_adm);
+cf_lockdown_day2_adm_numeric = days(counterfactual_phase3_start_date_adm - start_date_sim_adm);
+
+fprintf('Counterfactual Phase 2 Start Date (Admissions): %s (Day %d)\n', datestr(counterfactual_phase2_start_date_adm), cf_lockdown_day1_adm_numeric);
+fprintf('Counterfactual Phase 3 Start Date (Admissions): %s (Day %d)\n', datestr(counterfactual_phase3_start_date_adm), cf_lockdown_day2_adm_numeric);
+
+% Counterfactual (Earlier) Lockdown Scenario for Admissions 
+disp('Simulating counterfactual (earlier) lockdown scenario for admissions...');
+cf_model_admissions = simulate_sir_3betas(beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm, ...
+                                          cf_lockdown_day1_adm_numeric, cf_lockdown_day2_adm_numeric, ...
+                                          gamma_adm, S0_adm, I0_adm, R0_adm, N_adm, num_days_simulation_adm);
+disp('Counterfactual admissions scenario simulation complete.');
+
+% Plot
+disp('Plotting admissions results...');
+figure('Name', 'Counterfactual Analysis: Admissions - Earlier Lockdown');
+bar(all_dates_sim_adm, reported_admissions_full_series, 'FaceColor', [0.7 0.85 0.7], 'EdgeColor', 'none', 'DisplayName', 'Reported Admissions'); 
+hold on;
+plot(all_dates_sim_adm, original_model_admissions, 'b-', 'LineWidth', 2, 'DisplayName', 'Original SIR Model (Admissions)');
+plot(all_dates_sim_adm, cf_model_admissions, 'm--', 'LineWidth', 2, 'DisplayName', ['Lockdown ', num2str(days_to_shift_adm), ' Days Earlier Model (Admissions)']); 
+
+
+
+hold off;
+xlabel('Date');
+ylabel('New Hospital Admissions per Day');
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim_adm, end_date_sim_adm]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+% Analysis
+peak_original_admissions = max(original_model_admissions);
+peak_cf_admissions = max(cf_model_admissions);
+total_original_admissions = sum(original_model_admissions);
+total_cf_admissions = sum(cf_model_admissions);
+
+fprintf('\n--- Quantitative Comparison for Admissions ---\n');
+fprintf('Peak Admissions (Original Model): %.0f\n', peak_original_admissions);
+fprintf('Peak Admissions (Earlier Lockdown Model): %.0f\n', peak_cf_admissions);
+if peak_original_admissions > 0
+    fprintf('Reduction in Peak Admissions: %.0f (%.2f%%)\n', peak_original_admissions - peak_cf_admissions, (1 - peak_cf_admissions/peak_original_admissions)*100);
+else
+    fprintf('Reduction in Peak Admissions: %.0f\n', peak_original_admissions - peak_cf_admissions);
+end
+
+fprintf('Total Admissions (Original Model): %.0f\n', total_original_admissions);
+fprintf('Total Admissions (Earlier Lockdown Model): %.0f\n', total_cf_admissions);
+if total_original_admissions > 0
+    fprintf('Reduction in Total Admissions: %.0f (%.2f%%)\n', total_original_admissions - total_cf_admissions, (1 - total_cf_admissions/total_original_admissions)*100);
+else
+    fprintf('Reduction in Total Admissions: %.0f\n', total_original_admissions - total_cf_admissions);
+end
+
+disp('Counterfactual analysis for admissions complete.');
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% deaths if england locked down 14 days earlier
+disp('Starting Counterfactual Analysis for Deaths...');
+
+
+disp('Loading and preparing death data...');
+filename = 'england deaths nation_newDailyNsoDeathsByDeathDate.csv.xlsx';
+
+
+data = readtable(filename);
+dates_reported_deaths = datetime(data.date);
+deaths_reported_values = data.value;
+
+start_date_sim_deaths = datetime('2020-01-01');
+end_date_sim_deaths = datetime('2020-11-09'); 
+all_dates_sim_deaths = (start_date_sim_deaths:end_date_sim_deaths)';
+num_days_simulation_deaths = length(all_dates_sim_deaths);
+
+reported_deaths_full_series = zeros(num_days_simulation_deaths, 1);
+[~, idx_in_all_deaths] = ismember(dates_reported_deaths, all_dates_sim_deaths);
+valid_idx_reported_deaths = idx_in_all_deaths(idx_in_all_deaths > 0);
+reported_deaths_full_series(valid_idx_reported_deaths) = deaths_reported_values(idx_in_all_deaths > 0);
+reported_deaths_full_series(isnan(reported_deaths_full_series)) = 0;
+
+disp('Death data preparation complete.');
+
+%  Original Model Parameters and Lockdown Dates ---
+disp('Defining original model parameters for deaths...');
+
+N_deaths = 56e6;
+gamma_deaths = 1/5;  
+tau_deaths = 8;
+rho_deaths = 0.0157;
+I0_deaths = 1;      
+R0_deaths = 0;
+S0_deaths = N_deaths - I0_deaths - R0_deaths;
+
+beta1_fitted_val_deaths = 0.346880;  
+beta2_fitted_val_deaths = 0.170214;  
+beta3_fitted_val_deaths = 0.260424;  
+
+
+disp('USING THE FOLLOWING FITTED BETA VALUES FOR DEATHS (ensure these are correct and produced a good 3-phase fit):');
+fprintf('Beta1 (Deaths): %f\nBeta2 (Deaths): %f\nBeta3 (Deaths): %f\n', beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths);
+
+% Original lockdown dates from  deaths 
+original_phase2_start_date_deaths = datetime('2020-03-30');
+original_phase3_start_date_deaths = datetime('2020-08-09');
+
+original_lockdown_day1_deaths_numeric = days(original_phase2_start_date_deaths - start_date_sim_deaths);
+original_lockdown_day2_deaths_numeric = days(original_phase3_start_date_deaths - start_date_sim_deaths);
+
+disp('Original parameters and dates for deaths defined.');
+
+%  Original Lockdown Scenario for Deaths (using fitted parameters) 
+disp('Simulating original lockdown scenario for deaths...');
+original_model_deaths = simulate_sir_deaths_3phases(beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths, ...
+                                                original_lockdown_day1_deaths_numeric, original_lockdown_day2_deaths_numeric, ...
+                                                gamma_deaths, S0_deaths, I0_deaths, R0_deaths, N_deaths, ...
+                                                num_days_simulation_deaths, tau_deaths, rho_deaths);
+disp('Original deaths scenario simulation complete.');
+
+% Counterfactual (Earlier) Lockdown Dates for Deaths 
+disp('Defining counterfactual (earlier) lockdown dates for deaths...');
+days_to_shift_deaths = 14;
+counterfactual_phase2_start_date_deaths = original_phase2_start_date_deaths - days(days_to_shift_deaths);
+counterfactual_phase3_start_date_deaths = original_phase3_start_date_deaths - days(days_to_shift_deaths);
+
+cf_lockdown_day1_deaths_numeric = days(counterfactual_phase2_start_date_deaths - start_date_sim_deaths);
+cf_lockdown_day2_deaths_numeric = days(counterfactual_phase3_start_date_deaths - start_date_sim_deaths);
+
+fprintf('Counterfactual Phase 2 Start Date (Deaths): %s (Day %d)\n', datestr(counterfactual_phase2_start_date_deaths), cf_lockdown_day1_deaths_numeric);
+fprintf('Counterfactual Phase 3 Start Date (Deaths): %s (Day %d)\n', datestr(counterfactual_phase3_start_date_deaths), cf_lockdown_day2_deaths_numeric);
+
+% Counterfactual (Earlier) Lockdown Scenario for Deaths ---
+disp('Simulating counterfactual (earlier) lockdown scenario for deaths...');
+cf_model_deaths = simulate_sir_deaths_3phases(beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths, ...
+                                          cf_lockdown_day1_deaths_numeric, cf_lockdown_day2_deaths_numeric, ...
+                                          gamma_deaths, S0_deaths, I0_deaths, R0_deaths, N_deaths, ...
+                                          num_days_simulation_deaths, tau_deaths, rho_deaths);
+disp('Counterfactual deaths scenario simulation complete.');
+
+% Plot 
+disp('Plotting deaths results...');
+figure('Name', 'Counterfactual Analysis: Deaths - Earlier Lockdown');
+bar(all_dates_sim_deaths, reported_deaths_full_series, 'FaceColor', [0.9 0.7 0.7], 'EdgeColor', 'none', 'DisplayName', 'Reported Deaths'); 
+hold on;
+plot(all_dates_sim_deaths, original_model_deaths, 'b-', 'LineWidth', 2, 'DisplayName', 'Original SIR Model (Deaths)');
+plot(all_dates_sim_deaths, cf_model_deaths, 'k--', 'LineWidth', 2, 'DisplayName', ['Lockdown ', num2str(days_to_shift_deaths), ' Days Earlier Model (Deaths)']); 
+
+
+
+hold off;
+xlabel('Date');
+ylabel('New Deaths per Day');
+title(['COVID-19 Deaths: Original vs. Lockdown ', num2str(days_to_shift_deaths), ' Days Earlier']);
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim_deaths, end_date_sim_deaths]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+%analysis
+peak_original_deaths = max(original_model_deaths);
+peak_cf_deaths = max(cf_model_deaths);
+total_original_deaths = sum(original_model_deaths);
+total_cf_deaths = sum(cf_model_deaths);
+
+fprintf('\n--- Quantitative Comparison for Deaths ---\n');
+fprintf('Peak Deaths (Original Model): %.0f\n', peak_original_deaths);
+fprintf('Peak Deaths (Earlier Lockdown Model): %.0f\n', peak_cf_deaths);
+if peak_original_deaths > 0
+    fprintf('Reduction in Peak Deaths: %.0f (%.2f%%)\n', peak_original_deaths - peak_cf_deaths, (1 - peak_cf_deaths/peak_original_deaths)*100);
+else
+    fprintf('Reduction in Peak Deaths: %.0f\n', peak_original_deaths - peak_cf_deaths);
+end
+
+
+fprintf('Total Deaths (Original Model): %.0f\n', total_original_deaths);
+fprintf('Total Deaths (Earlier Lockdown Model): %.0f\n', total_cf_deaths);
+if total_original_deaths > 0
+    fprintf('Reduction in Total Deaths: %.0f (%.2f%%)\n', total_original_deaths - total_cf_deaths, (1 - total_cf_deaths/total_original_deaths)*100);
+else
+    fprintf('Reduction in Total Deaths: %.0f\n', total_original_deaths - total_cf_deaths);
+end
+
+
+disp('Counterfactual analysis for deaths complete.');
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%%cases if lockdown was 7 days later%%
+filename = 'england cases nation_newCasesBySpecimenDate.csv.xlsx';
+data = readtable(filename, 'Sheet', 'nation_newCasesBySpecimenDate');
+
+dates_reported = datetime(data.date);
+new_cases_reported = data.value;
+
+start_date_sim = datetime('2020-01-01');
+end_date_sim = datetime('2020-11-09'); 
+all_dates_sim = (start_date_sim:end_date_sim)';
+num_days_simulation = length(all_dates_sim);
+
+reported_cases_full_series = zeros(num_days_simulation, 1);
+[~, idx_in_all] = ismember(dates_reported, all_dates_sim);
+valid_idx_reported = idx_in_all(idx_in_all > 0);
+reported_cases_full_series(valid_idx_reported) = new_cases_reported(idx_in_all > 0);
+reported_cases_full_series(isnan(reported_cases_full_series)) = 0;
+
+N = 56000000; 
+I0_cases = 1; R0_cases = 0; S0_cases = N - I0 - R0; 
+gamma_cases = 0.2;
+
+beta1_fitted_cases = 0.284866;   
+beta2_fitted_cases = 0.112748;  
+beta3_fitted_cases = 0.262636;
+
+fprintf('Beta1 (Cases): %f\nBeta2 (Cases): %f\nBeta3 (Cases): %f\n', beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases);
+
+original_phase2_start_cases_date = datetime('2020-04-17');
+original_phase3_start_cases_date = datetime('2020-07-01');
+
+original_lockdown_day1_cases_numeric = days( original_phase2_start_cases_date - start_date_sim);
+original_lockdown_day2_cases_numeric = days( original_phase3_start_cases_date - start_date_sim);
+
+% Simulate Original Lockdown Scenario (using fitted parameters)
+original_model_cases = simulate_sir_3betas(beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases, ...
+                                           original_lockdown_day1_cases_numeric, original_lockdown_day2_cases_numeric, ...
+                                           gamma_cases, S0_cases, I0_cases, R0_cases, N, num_days_simulation);
+disp('Original scenario simulation complete.');
+
+%Define Earlier Lockdown Dates ---
+disp('Defining counterfactual (earlier) lockdown dates...');
+days_to_shift = 7;
+counterfactual_phase2_start_date_cases = original_phase2_start_cases_date + days(days_to_shift);
+counterfactual_phase3_start_date_cases = original_phase3_start_cases_date + days(days_to_shift);
+
+cf_lockdown_day1_cases_numeric = days(counterfactual_phase2_start_date_cases - start_date_sim);
+cf_lockdown_day2_cases_numeric = days(counterfactual_phase3_start_date_cases - start_date_sim);
+
+fprintf('Counterfactual Phase 2 Start Date: %s (Day %d)\n', datestr(counterfactual_phase2_start_date_cases), cf_lockdown_day1_cases_numeric);
+fprintf('Counterfactual Phase 3 Start Date: %s (Day %d)\n', datestr(counterfactual_phase3_start_date_cases), cf_lockdown_day2_cases_numeric);
+
+% Simulate Counterfactual later Scenario
+cf_model_cases = simulate_sir_3betas(beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases, ...
+                                     cf_lockdown_day1_cases_numeric, cf_lockdown_day2_cases_numeric, ...
+                                     gamma_cases, S0_cases, I0_cases, R0_cases, N, num_days_simulation);
+
+% Plot 
+disp('Plotting results...');
+figure('Name', 'Counterfactual Analysis: Cases - Earlier Lockdown');
+bar(all_dates_sim, reported_cases_full_series, 'FaceColor', [0.8 0.8 0.8], 'EdgeColor', 'none', 'DisplayName', 'Reported Cases');
+hold on;
+plot(all_dates_sim, original_model_cases, 'r-', 'LineWidth', 2, 'DisplayName', 'Original SIR Model');
+plot(all_dates_sim, cf_model_cases, 'b--', 'LineWidth', 2, 'DisplayName', ['Lockdown ', num2str(days_to_shift), ' Days Later Model']);
+
+
+hold off;
+xlabel('Date');
+ylabel('New Cases per Day');
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim, end_date_sim]);
+ylim([0 25000]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+% Analysis
+peak_original_cases = max(original_model_cases);
+peak_cf_cases = max(cf_model_cases);
+total_original_cases = sum(original_model_cases);
+total_cf_cases = sum(cf_model_cases);
+
+fprintf('\n--- Quantitative Comparison for Cases ---\n');
+fprintf('Peak Cases (Original Model): %.0f\n', peak_original_cases);
+fprintf('Peak Cases (Earlier Lockdown Model): %.0f\n', peak_cf_cases);
+fprintf('Reduction in Peak Cases: %.0f (%.2f%%)\n', peak_original_cases - peak_cf_cases, (1 - peak_cf_cases/peak_original_cases)*100);
+
+fprintf('Total Cases (Original Model): %.0f\n', total_original_cases);
+fprintf('Total Cases (Earlier Lockdown Model): %.0f\n', total_cf_cases);
+fprintf('Reduction in Total Cases: %.0f (%.2f%%)\n', total_original_cases - total_cf_cases, (1 - total_cf_cases/total_original_cases)*100);
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% admissions if lockdown occured 7 days later%%
+
+filename = 'england healthcare nation_newAdmissions.csv.xlsx';
+data = readtable(filename, 'Sheet', 'nation_newAdmissions');
+dates_reported_adm = datetime(data.date);
+admissions_reported_values = data.value;
+
+start_date_sim_adm = datetime('2020-01-01');
+end_date_sim_adm = datetime('2020-11-11'); 
+all_dates_sim_adm = (start_date_sim_adm:end_date_sim_adm)';
+num_days_simulation_adm = length(all_dates_sim_adm);
+
+reported_admissions_full_series = zeros(num_days_simulation_adm, 1);
+[~, idx_in_all_adm] = ismember(dates_reported_adm, all_dates_sim_adm);
+valid_idx_reported_adm = idx_in_all_adm(idx_in_all_adm > 0);
+reported_admissions_full_series(valid_idx_reported_adm) = admissions_reported_values(idx_in_all_adm > 0);
+reported_admissions_full_series(isnan(reported_admissions_full_series)) = 0;
+
+disp('Admissions data preparation complete.');
+
+% Original Model Parameters and Lockdown Dates 
+disp('Defining original model parameters for admissions...');
+
+N_adm = 56000000;
+gamma_adm = 1/5;
+I0_adm = 1; 
+R0_adm = 0;
+S0_adm = N_adm - I0_adm - R0_adm; 
+
+beta1_fitted_adm = 0.287082;   
+beta2_fitted_adm = 0.169216;  
+beta3_fitted_adm = 0.232222;   
+ 
+
+fprintf('Beta1 (Admissions): %f\nBeta2 (Admissions): %f\nBeta3 (Admissions): %f\n', beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm);
+
+% Original lockdown dates from admissions 
+original_phase2_start_date_adm = datetime('2020-04-01');
+original_phase3_start_date_adm = datetime('2020-08-02');
+
+original_lockdown_day1_adm_numeric = days(original_phase2_start_date_adm - start_date_sim_adm);
+original_lockdown_day2_adm_numeric = days(original_phase3_start_date_adm - start_date_sim_adm);
+
+disp('Original parameters and dates for admissions defined.');
+
+% Original Lockdown Scenario for Admissions (using fitted parameters) 
+disp('Simulating original lockdown scenario for admissions...');
+original_model_admissions = simulate_sir_3betas(beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm, ...
+                                                original_lockdown_day1_adm_numeric, original_lockdown_day2_adm_numeric, ...
+                                                gamma_adm, S0_adm, I0_adm, R0_adm, N_adm, num_days_simulation_adm);
+disp('Original admissions scenario simulation complete.');
+
+%  Counterfactual (Earlier) Lockdown Dates for Admissions 
+disp('Defining counterfactual (earlier) lockdown dates for admissions...');
+days_to_shift_adm = 7;
+counterfactual_phase2_start_date_adm = original_phase2_start_date_adm + days(days_to_shift_adm);
+counterfactual_phase3_start_date_adm = original_phase3_start_date_adm + days(days_to_shift_adm);
+
+cf_lockdown_day1_adm_numeric = days(counterfactual_phase2_start_date_adm - start_date_sim_adm);
+cf_lockdown_day2_adm_numeric = days(counterfactual_phase3_start_date_adm - start_date_sim_adm);
+
+fprintf('Counterfactual Phase 2 Start Date (Admissions): %s (Day %d)\n', datestr(counterfactual_phase2_start_date_adm), cf_lockdown_day1_adm_numeric);
+fprintf('Counterfactual Phase 3 Start Date (Admissions): %s (Day %d)\n', datestr(counterfactual_phase3_start_date_adm), cf_lockdown_day2_adm_numeric);
+
+%  Simulate Counterfactual (later) Lockdown Scenario for Admissions ---
+disp('Simulating counterfactual (earlier) lockdown scenario for admissions...');
+cf_model_admissions = simulate_sir_3betas(beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm, ...
+                                          cf_lockdown_day1_adm_numeric, cf_lockdown_day2_adm_numeric, ...
+                                          gamma_adm, S0_adm, I0_adm, R0_adm, N_adm, num_days_simulation_adm);
+disp('Counterfactual admissions scenario simulation complete.');
+
+% plot
+disp('Plotting admissions results...');
+figure('Name', 'Counterfactual Analysis: Admissions - Later Lockdown');
+bar(all_dates_sim_adm, reported_admissions_full_series, 'FaceColor', [0.7 0.85 0.7], 'EdgeColor', 'none', 'DisplayName', 'Reported Admissions'); % Changed color
+hold on;
+plot(all_dates_sim_adm, original_model_admissions, 'b-', 'LineWidth', 2, 'DisplayName', 'Original SIR Model (Admissions)');
+plot(all_dates_sim_adm, cf_model_admissions, 'm--', 'LineWidth', 2, 'DisplayName', ['Lockdown ', num2str(days_to_shift_adm), ' Days Later Model (Admissions)']); % Changed color
+
+
+
+hold off;
+xlabel('Date');
+ylabel('New Hospital Admissions per Day');
+title(['COVID-19 Admissions: Original vs. Lockdown ', num2str(days_to_shift_adm), ' Days Later']);
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim_adm, end_date_sim_adm]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+% analysis
+peak_original_admissions = max(original_model_admissions);
+peak_cf_admissions = max(cf_model_admissions);
+total_original_admissions = sum(original_model_admissions);
+total_cf_admissions = sum(cf_model_admissions);
+
+fprintf('\n--- Quantitative Comparison for Admissions ---\n');
+fprintf('Peak Admissions (Original Model): %.0f\n', peak_original_admissions);
+fprintf('Peak Admissions (Earlier Lockdown Model): %.0f\n', peak_cf_admissions);
+if peak_original_admissions > 0
+    fprintf('Reduction in Peak Admissions: %.0f (%.2f%%)\n', peak_original_admissions - peak_cf_admissions, (1 - peak_cf_admissions/peak_original_admissions)*100);
+else
+    fprintf('Reduction in Peak Admissions: %.0f\n', peak_original_admissions - peak_cf_admissions);
+end
+
+fprintf('Total Admissions (Original Model): %.0f\n', total_original_admissions);
+fprintf('Total Admissions (Earlier Lockdown Model): %.0f\n', total_cf_admissions);
+if total_original_admissions > 0
+    fprintf('Reduction in Total Admissions: %.0f (%.2f%%)\n', total_original_admissions - total_cf_admissions, (1 - total_cf_admissions/total_original_admissions)*100);
+else
+    fprintf('Reduction in Total Admissions: %.0f\n', total_original_admissions - total_cf_admissions);
+end
+
+disp('Counterfactual analysis for admissions complete.');
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% deaths if england locked down 7 days later
+
+disp('Loading and preparing death data...');
+filename = 'england deaths nation_newDailyNsoDeathsByDeathDate.csv.xlsx';
+
+data = readtable(filename);
+dates_reported_deaths = datetime(data.date);
+deaths_reported_values = data.value;
+start_date_sim_deaths = datetime('2020-01-01');
+end_date_sim_deaths = datetime('2020-11-15'); 
+all_dates_sim_deaths = (start_date_sim_deaths:end_date_sim_deaths)';
+num_days_simulation_deaths = length(all_dates_sim_deaths);
+
+reported_deaths_full_series = zeros(num_days_simulation_deaths, 1);
+[~, idx_in_all_deaths] = ismember(dates_reported_deaths, all_dates_sim_deaths);
+valid_idx_reported_deaths = idx_in_all_deaths(idx_in_all_deaths > 0);
+reported_deaths_full_series(valid_idx_reported_deaths) = deaths_reported_values(idx_in_all_deaths > 0);
+reported_deaths_full_series(isnan(reported_deaths_full_series)) = 0;
+
+disp('Death data preparation complete.');
+
+
+disp('Defining original model parameters for deaths...');
+
+N_deaths = 56e6;
+gamma_deaths = 1/5; 
+tau_deaths = 2;
+rho_deaths = 0.0157;
+I0_deaths = 1;      
+R0_deaths = 0;
+S0_deaths = N_deaths - I0_deaths - R0_deaths;
+
+
+beta1_fitted_val_deaths = 0.3341;  
+beta2_fitted_val_deaths = 0.1568;  
+beta3_fitted_val_deaths = 0.3119;  
+
+
+
+
+disp('USING THE FOLLOWING FITTED BETA VALUES FOR DEATHS (ensure these are correct and produced a good 3-phase fit):');
+fprintf('Beta1 (Deaths): %f\nBeta2 (Deaths): %f\nBeta3 (Deaths): %f\n', beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths);
+
+% Original lockdown dates from deaths 
+original_phase2_start_date_deaths = datetime('2020-04-08');
+original_phase3_start_date_deaths = datetime('2020-08-31');
+original_lockdown_day1_deaths_numeric = days(original_phase2_start_date_deaths - start_date_sim_deaths);
+original_lockdown_day2_deaths_numeric = days(original_phase3_start_date_deaths - start_date_sim_deaths);
+
+disp('Original parameters and dates for deaths defined.');
+
+% -Simulate Original Lockdown Scenario for Deaths (using fitted parameters) 
+disp('Simulating original lockdown scenario for deaths...');
+original_model_deaths = simulate_sir_deaths_3phases(beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths, ...
+                                                original_lockdown_day1_deaths_numeric, original_lockdown_day2_deaths_numeric, ...
+                                                gamma_deaths, S0_deaths, I0_deaths, R0_deaths, N_deaths, ...
+                                                num_days_simulation_deaths, tau_deaths, rho_deaths);
+disp('Original deaths scenario simulation complete.');
+
+% Define Counterfactual (later) Lockdown Dates for Deaths 
+disp('Defining counterfactual (later) lockdown dates for deaths...');
+days_to_shift_deaths = 7;
+counterfactual_phase2_start_date_deaths = original_phase2_start_date_deaths + days(days_to_shift_deaths);
+counterfactual_phase3_start_date_deaths = original_phase3_start_date_deaths + days(days_to_shift_deaths);
+
+cf_lockdown_day1_deaths_numeric = days(counterfactual_phase2_start_date_deaths - start_date_sim_deaths);
+cf_lockdown_day2_deaths_numeric = days(counterfactual_phase3_start_date_deaths - start_date_sim_deaths);
+
+fprintf('Counterfactual Phase 2 Start Date (Deaths): %s (Day %d)\n', datestr(counterfactual_phase2_start_date_deaths), cf_lockdown_day1_deaths_numeric);
+fprintf('Counterfactual Phase 3 Start Date (Deaths): %s (Day %d)\n', datestr(counterfactual_phase3_start_date_deaths), cf_lockdown_day2_deaths_numeric);
+
+% Counterfactual (later) Lockdown Scenario for Deaths ---
+disp('Simulating counterfactual (earlier) lockdown scenario for deaths...');
+cf_model_deaths = simulate_sir_deaths_3phases(beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths, ...
+                                          cf_lockdown_day1_deaths_numeric, cf_lockdown_day2_deaths_numeric, ...
+                                          gamma_deaths, S0_deaths, I0_deaths, R0_deaths, N_deaths, ...
+                                          num_days_simulation_deaths, tau_deaths, rho_deaths);
+disp('Counterfactual deaths scenario simulation complete.');
+
+% -plot
+disp('Plotting deaths results...');
+figure('Name', 'Counterfactual Analysis: Deaths - Later Lockdown');
+bar(all_dates_sim_deaths, reported_deaths_full_series, 'FaceColor', [0.9 0.7 0.7], 'EdgeColor', 'none', 'DisplayName', 'Reported Deaths'); 
+hold on;
+plot(all_dates_sim_deaths, original_model_deaths, 'b-', 'LineWidth', 2, 'DisplayName', 'Original SIR Model (Deaths)');
+plot(all_dates_sim_deaths, cf_model_deaths, 'k--', 'LineWidth', 2, 'DisplayName', ['Lockdown ', num2str(days_to_shift_deaths), ' Days Later Model (Deaths)']); 
+
+hold off;
+xlabel('Date');
+ylabel('New Deaths per Day');
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim_deaths, end_date_sim_deaths]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+% analysis
+peak_original_deaths = max(original_model_deaths);
+peak_cf_deaths = max(cf_model_deaths);
+total_original_deaths = sum(original_model_deaths);
+total_cf_deaths = sum(cf_model_deaths);
+
+fprintf('\n--- Quantitative Comparison for Deaths ---\n');
+fprintf('Peak Deaths (Original Model): %.0f\n', peak_original_deaths);
+fprintf('Peak Deaths (Earlier Lockdown Model): %.0f\n', peak_cf_deaths);
+if peak_original_deaths > 0
+    fprintf('Reduction in Peak Deaths: %.0f (%.2f%%)\n', peak_original_deaths - peak_cf_deaths, (1 - peak_cf_deaths/peak_original_deaths)*100);
+else
+    fprintf('Reduction in Peak Deaths: %.0f\n', peak_original_deaths - peak_cf_deaths);
+end
+
+
+fprintf('Total Deaths (Original Model): %.0f\n', total_original_deaths);
+fprintf('Total Deaths (Earlier Lockdown Model): %.0f\n', total_cf_deaths);
+if total_original_deaths > 0
+    fprintf('Reduction in Total Deaths: %.0f (%.2f%%)\n', total_original_deaths - total_cf_deaths, (1 - total_cf_deaths/total_original_deaths)*100);
+else
+    fprintf('Reduction in Total Deaths: %.0f\n', total_original_deaths - total_cf_deaths);
+end
+
+
+disp('Counterfactual analysis for deaths complete.');
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% cases if lockdown RELAXATION was 7 days LATER %% 
+filename = 'england cases nation_newCasesBySpecimenDate.csv.xlsx';
+data = readtable(filename, 'Sheet', 'nation_newCasesBySpecimenDate');
+
+dates_reported = datetime(data.date);
+new_cases_reported = data.value;
+
+start_date_sim = datetime('2020-01-01');
+
+end_date_sim = datetime('2020-11-11'); 
+all_dates_sim = (start_date_sim:end_date_sim)';
+num_days_simulation = length(all_dates_sim);
+
+reported_cases_full_series = zeros(num_days_simulation, 1);
+[~, idx_in_all] = ismember(dates_reported, all_dates_sim);
+valid_idx_reported = idx_in_all(idx_in_all > 0);
+reported_cases_full_series(valid_idx_reported) = new_cases_reported(idx_in_all > 0);
+reported_cases_full_series(isnan(reported_cases_full_series)) = 0;
+
+N = 56000000; 
+I0_cases = 1; 
+R0_cases = 0;
+S0_cases = N - I0_cases - R0_cases;
+gamma_cases = 0.2; 
+
+
+beta1_fitted_cases = 0.284866;   
+beta2_fitted_cases = 0.112748;  
+beta3_fitted_cases = 0.262636;
+
+fprintf('Using Fitted Beta Values:\nBeta1 (Cases): %f\nBeta2 (Cases): %f\nBeta3 (Cases): %f\n', beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases);
+
+original_phase2_start_cases_date = datetime('2020-04-17'); % This is when lockdown (beta2) starts
+original_phase3_start_cases_date = datetime('2020-07-01'); % This is when relaxation (beta3) starts
+
+original_lockdown_day1_cases_numeric = days(original_phase2_start_cases_date - start_date_sim);
+original_lockdown_day2_cases_numeric = days(original_phase3_start_cases_date - start_date_sim);
+
+% Simulating Original Lockdown Scenario (using fitted parameters)
+original_model_cases = simulate_sir_3betas(beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases, ...
+                                           original_lockdown_day1_cases_numeric, original_lockdown_day2_cases_numeric, ...
+                                           gamma_cases, S0_cases, I0_cases, R0_cases, N, num_days_simulation);
+disp('Original scenario simulation complete.');
+
+% Define Counterfactual: RELAXATION 7 Days LATER
+disp('Defining counterfactual (RELAXATION 7 DAYS LATER) dates...');
+days_to_shift_relaxation = 7;
+
+% Phase 2 (lockdown) start date REMAINS THE SAME as original
+cf_relax_later_phase2_start_date = original_phase2_start_cases_date;
+
+% Phase 3 (relaxation) start date is SHIFTED LATER
+cf_relax_later_phase3_start_date = original_phase3_start_cases_date + days(days_to_shift_relaxation);
+
+% Convert to numeric day counts for the simulation function
+cf_relax_later_lockdown_day1_numeric = days(cf_relax_later_phase2_start_date - start_date_sim); 
+cf_relax_later_lockdown_day2_numeric = days(cf_relax_later_phase3_start_date - start_date_sim); 
+
+fprintf('Counterfactual Phase 2 Start Date (Lockdown Start): %s (Day %d)\n', datestr(cf_relax_later_phase2_start_date), cf_relax_later_lockdown_day1_numeric);
+fprintf('Counterfactual Phase 3 Start Date (Relaxation Start - LATER): %s (Day %d)\n', datestr(cf_relax_later_phase3_start_date), cf_relax_later_lockdown_day2_numeric);
+
+% Checking if the shifted relaxation date goes beyond the simulation period
+if cf_relax_later_phase3_start_date > end_date_sim
+    warning('Shifted Phase 3 start date (%s) is beyond the simulation end date (%s). The third phase might be cut short or not appear fully.', ...
+            datestr(cf_relax_later_phase3_start_date), datestr(end_date_sim));
+end
+
+% Simulating Counterfactual: RELAXATION 7 Days LATER Scenario
+cf_relax_later_model_cases = simulate_sir_3betas(beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases, ...
+                                     cf_relax_later_lockdown_day1_numeric, cf_relax_later_lockdown_day2_numeric, ...
+                                     gamma_cases, S0_cases, I0_cases, R0_cases, N, num_days_simulation);
+disp('Relaxation 7 Days Later scenario simulation complete.');
+
+% plot-
+disp('Plotting results...');
+figure('Name', 'Counterfactual Analysis: Cases - Relaxation 7 Days Later'); 
+bar(all_dates_sim, reported_cases_full_series, 'FaceColor', [0.8 0.8 0.8], 'EdgeColor', 'none', 'DisplayName', 'Reported Cases');
+hold on;
+plot(all_dates_sim, original_model_cases, 'r-', 'LineWidth', 2, 'DisplayName', 'Original Relaxation Timing Model');
+plot(all_dates_sim, cf_relax_later_model_cases, 'b--', 'LineWidth', 2, 'DisplayName', ['Relaxation ', num2str(days_to_shift_relaxation), ' Days LATER Model']); 
+
+
+
+hold off;
+xlabel('Date');
+ylabel('New Cases per Day');
+title(['COVID-19 Cases: Original vs. Lockdown Relaxation ', num2str(days_to_shift_relaxation), ' Days LATER']); 
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim, end_date_sim]);
+ylim([0 30000]); 
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+%  Quantitative Analysis 
+peak_original_cases = max(original_model_cases);
+peak_cf_relax_later_cases = max(cf_relax_later_model_cases);
+total_original_cases = sum(original_model_cases);
+total_cf_relax_later_cases = sum(cf_relax_later_model_cases);
+
+fprintf('\n--- Quantitative Comparison for Cases (Relaxation %d Days Later) ---\n', days_to_shift_relaxation);
+fprintf('Peak Cases (Original Relaxation Model): %.0f\n', peak_original_cases);
+fprintf('Peak Cases (%d Days Later Relaxation Model): %.0f\n', days_to_shift_relaxation, peak_cf_relax_later_cases);
+
+
+fprintf('Total Cases (Original Relaxation Model): %.0f\n', total_original_cases);
+fprintf('Total Cases (%d Days Later Relaxation Model): %.0f\n', days_to_shift_relaxation, total_cf_relax_later_cases);
+fprintf('Change in Total Cases: %.0f (%.2f%% of original)\n', total_cf_relax_later_cases - total_original_cases, ((total_cf_relax_later_cases/total_original_cases)-1)*100);
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% Counterfactual Analysis: Admissions - Relaxation 7 Days LATER %%
+
+disp('Starting Counterfactual Analysis for Hospital Admissions (Relaxation Later)...');
+
+
+disp('Loading and preparing admissions data...');
+filename_adm = 'england healthcare nation_newAdmissions.csv.xlsx';
+
+
+
+data = readtable(filename);
+dates_reported_adm = datetime(data.date);
+admissions_reported_values = data.value;
+
+start_date_sim_adm = datetime('2020-01-01');
+
+end_date_sim_adm = datetime('2020-11-18'); 
+all_dates_sim_adm = (start_date_sim_adm:end_date_sim_adm)';
+num_days_simulation_adm = length(all_dates_sim_adm);
+
+reported_admissions_full_series = zeros(num_days_simulation_adm, 1);
+[~, idx_in_all_adm] = ismember(dates_reported_adm, all_dates_sim_adm);
+valid_idx_reported_adm = idx_in_all_adm(idx_in_all_adm > 0);
+reported_admissions_full_series(valid_idx_reported_adm) = admissions_reported_values(idx_in_all_adm > 0);
+reported_admissions_full_series(isnan(reported_admissions_full_series)) = 0;
+
+disp('Admissions data preparation complete.');
+
+
+disp('Defining original model parameters for admissions...');
+
+N_adm = 56000000;
+gamma_adm = 1/5; 
+I0_adm = 1;      
+R0_adm = 0;
+S0_adm = N_adm - I0_adm - R0_adm;
+
+
+beta1_fitted_adm = 0.287082;   
+beta2_fitted_adm = 0.169216;  
+beta3_fitted_adm = 0.232222;  
+
+disp('USING THE FOLLOWING FITTED PARAMETERS FOR ADMISSIONS (ensure these produced a good 3-phase fit):');
+fprintf('I0 (Admissions): %.0f\n', I0_adm);
+fprintf('Gamma (Admissions): %f\n', gamma_adm);
+fprintf('Beta1 (Admissions): %f\nBeta2 (Admissions): %f\nBeta3 (Admissions): %f\n', beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm);
+
+% Original lockdown dates from previous admisions 
+original_phase2_start_date_adm = datetime('2020-04-01');
+original_phase3_start_date_adm = datetime('2020-08-02');
+
+original_lockdown_day1_adm_numeric = days(original_phase2_start_date_adm - start_date_sim_adm);
+original_lockdown_day2_adm_numeric = days(original_phase3_start_date_adm - start_date_sim_adm);
+
+disp('Original parameters and dates for admissions defined.');
+
+% Original Lockdown Scenario for Admissions (using fitted parameters) 
+disp('Simulating original lockdown scenario for admissions...');
+original_model_admissions = simulate_sir_3betas(beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm, ...
+                                                original_lockdown_day1_adm_numeric, original_lockdown_day2_adm_numeric, ...
+                                                gamma_adm, S0_adm, I0_adm, R0_adm, N_adm, num_days_simulation_adm);
+disp('Original admissions scenario simulation complete.');
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%  Counterfactual: RELAXATION 7 Days LATER for Admissions 
+disp('Defining counterfactual (RELAXATION 7 DAYS LATER) dates for admissions...');
+days_to_shift_relaxation_adm = 7;
+
+% Phase 2 (lockdown) start date REMAINS THE SAME
+cf_relax_later_phase2_start_date_adm = original_phase2_start_date_adm;
+
+% Phase 3 (relaxation) start date is SHIFTED LATER
+cf_relax_later_phase3_start_date_adm = original_phase3_start_date_adm + days(days_to_shift_relaxation_adm);
+
+cf_relax_later_lockdown_day1_adm_numeric = days(cf_relax_later_phase2_start_date_adm - start_date_sim_adm);
+cf_relax_later_lockdown_day2_adm_numeric = days(cf_relax_later_phase3_start_date_adm - start_date_sim_adm);
+
+fprintf('Counterfactual Phase 2 Start Date (Lockdown Start - Admissions): %s (Day %d)\n', datestr(cf_relax_later_phase2_start_date_adm), cf_relax_later_lockdown_day1_adm_numeric);
+fprintf('Counterfactual Phase 3 Start Date (Relaxation Start - LATER - Admissions): %s (Day %d)\n', datestr(cf_relax_later_phase3_start_date_adm), cf_relax_later_lockdown_day2_adm_numeric);
+
+if cf_relax_later_phase3_start_date_adm > end_date_sim_adm
+    warning('Shifted Phase 3 start date for admissions (%s) is beyond the simulation end date (%s).', ...
+            datestr(cf_relax_later_phase3_start_date_adm), datestr(end_date_sim_adm));
+end
+
+% Counterfactual: RELAXATION 7 Days LATER Scenario for Admissions 
+disp('Simulating counterfactual (Relaxation 7 Days Later) scenario for admissions...');
+cf_relax_later_model_admissions = simulate_sir_3betas(beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm, ...
+                                                      cf_relax_later_lockdown_day1_adm_numeric, cf_relax_later_lockdown_day2_adm_numeric, ...
+                                                      gamma_adm, S0_adm, I0_adm, R0_adm, N_adm, num_days_simulation_adm);
+disp('Relaxation 7 Days Later admissions scenario simulation complete.');
+
+% plot
+disp('Plotting admissions results...');
+figure('Name', 'Counterfactual Analysis: Admissions - Relaxation 7 Days Later');
+bar(all_dates_sim_adm, reported_admissions_full_series, 'FaceColor', [0.7 0.85 0.7], 'EdgeColor', 'none', 'DisplayName', 'Reported Admissions');
+hold on;
+plot(all_dates_sim_adm, original_model_admissions, 'b-', 'LineWidth', 2, 'DisplayName', 'Original Relaxation Timing Model (Admissions)');
+plot(all_dates_sim_adm, cf_relax_later_model_admissions, 'm--', 'LineWidth', 2, 'DisplayName', ['Relaxation ', num2str(days_to_shift_relaxation_adm), ' Days LATER Model (Admissions)']);
+
+hold off;
+xlabel('Date');
+ylabel('New Hospital Admissions per Day');
+title(['COVID-19 Admissions: Original vs. Lockdown Relaxation ', num2str(days_to_shift_relaxation_adm), ' Days LATER']);
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim_adm, end_date_sim_adm]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+% analysis
+peak_original_admissions = max(original_model_admissions);
+peak_cf_relax_later_admissions = max(cf_relax_later_model_admissions);
+total_original_admissions = sum(original_model_admissions);
+total_cf_relax_later_admissions = sum(cf_relax_later_model_admissions);
+
+fprintf('\n--- Quantitative Comparison for Admissions (Relaxation %d Days Later) ---\n', days_to_shift_relaxation_adm);
+fprintf('Peak Admissions (Original Relaxation Model): %.0f\n', peak_original_admissions);
+fprintf('Peak Admissions (%d Days Later Relaxation Model): %.0f\n', days_to_shift_relaxation_adm, peak_cf_relax_later_admissions);
+
+fprintf('Total Admissions (Original Relaxation Model): %.0f\n', total_original_admissions);
+fprintf('Total Admissions (%d Days Later Relaxation Model): %.0f\n', days_to_shift_relaxation_adm, total_cf_relax_later_admissions);
+fprintf('Change in Total Admissions: %.0f (%.2f%% of original)\n', total_cf_relax_later_admissions - total_original_admissions, ((total_cf_relax_later_admissions/total_original_admissions)-1)*100);
+
+disp('Counterfactual analysis for admissions complete.');
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% Counterfactual Analysis: deaths - Relaxation 7 Days LATER %%
+
+disp('Loading and preparing death data...');
+
+filename = 'england deaths nation_newDailyNsoDeathsByDeathDate.csv.xlsx';
+
+
+data = readtable(filename);
+dates_reported_deaths = datetime(data.date);
+deaths_reported_values = data.value;
+
+start_date_sim_deaths = datetime('2020-01-01');
+
+end_date_sim_deaths = datetime('2020-11-25'); 
+all_dates_sim_deaths = (start_date_sim_deaths:end_date_sim_deaths)';
+num_days_simulation_deaths = length(all_dates_sim_deaths);
+
+reported_deaths_full_series = zeros(num_days_simulation_deaths, 1);
+[~, idx_in_all_deaths] = ismember(dates_reported_deaths, all_dates_sim_deaths);
+valid_idx_reported_deaths = idx_in_all_deaths(idx_in_all_deaths > 0);
+reported_deaths_full_series(valid_idx_reported_deaths) = deaths_reported_values(idx_in_all_deaths > 0);
+reported_deaths_full_series(isnan(reported_deaths_full_series)) = 0;
+
+disp('Death data preparation complete.');
+
+% Original Model Parameters and Lockdown Dates 
+disp('Defining original model parameters for deaths...');
+
+N_deaths = 56e6;
+gamma_deaths = 1/5;    
+tau_deaths = 8;
+rho_deaths = 0.0157;
+I0_deaths = 1;        
+R0_deaths = 0;
+S0_deaths = N_deaths - I0_deaths - R0_deaths;
+
+beta1_fitted_val_deaths = 0.3469;  
+beta2_fitted_val_deaths = 0.1702;  
+beta3_fitted_val_deaths = 0.2604;
+ 
+disp('USING THE FOLLOWING FITTED PARAMETERS FOR DEATHS (ensure these produced a good 3-phase fit):');
+fprintf('I0 (Deaths): %.0f\n', I0_deaths);
+fprintf('Gamma (Deaths): %f\n', gamma_deaths);
+fprintf('Beta1 (Deaths): %f\nBeta2 (Deaths): %f\nBeta3 (Deaths): %f\n', beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths);
+
+% Original lockdown dates previous deaths script
+original_phase2_start_date_deaths = datetime('2020-03-30');
+original_phase3_start_date_deaths = datetime('2020-08-09');
+
+original_lockdown_day1_deaths_numeric = days(original_phase2_start_date_deaths - start_date_sim_deaths);
+original_lockdown_day2_deaths_numeric = days(original_phase3_start_date_deaths - start_date_sim_deaths);
+
+disp('Original parameters and dates for deaths defined.');
+
+%Simulate Original Lockdown Scenario
+disp('Simulating original lockdown scenario for deaths...');
+original_model_deaths = simulate_sir_deaths_3phases(beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths, ...
+                                                original_lockdown_day1_deaths_numeric, original_lockdown_day2_deaths_numeric, ...
+                                                gamma_deaths, S0_deaths, I0_deaths, R0_deaths, N_deaths, ...
+                                                num_days_simulation_deaths, tau_deaths, rho_deaths);
+disp('Original deaths scenario simulation complete.');
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%  Counterfactual: RELAXATION 7 Days LATER for Deaths 
+disp('Defining counterfactual (RELAXATION 7 DAYS LATER) dates for deaths...');
+days_to_shift_relaxation_deaths = 7;
+
+% Phase 2 (lockdown) start date REMAINS THE SAME
+cf_relax_later_phase2_start_date_deaths = original_phase2_start_date_deaths;
+
+% Phase 3 (relaxation) start date is SHIFTED LATER
+cf_relax_later_phase3_start_date_deaths = original_phase3_start_date_deaths + days(days_to_shift_relaxation_deaths);
+
+cf_relax_later_lockdown_day1_deaths_numeric = days(cf_relax_later_phase2_start_date_deaths - start_date_sim_deaths);
+cf_relax_later_lockdown_day2_deaths_numeric = days(cf_relax_later_phase3_start_date_deaths - start_date_sim_deaths);
+
+fprintf('Counterfactual Phase 2 Start Date (Lockdown Start - Deaths): %s (Day %d)\n', datestr(cf_relax_later_phase2_start_date_deaths), cf_relax_later_lockdown_day1_deaths_numeric);
+fprintf('Counterfactual Phase 3 Start Date (Relaxation Start - LATER - Deaths): %s (Day %d)\n', datestr(cf_relax_later_phase3_start_date_deaths), cf_relax_later_lockdown_day2_deaths_numeric);
+
+if cf_relax_later_phase3_start_date_deaths > end_date_sim_deaths
+    warning('Shifted Phase 3 start date for deaths (%s) is beyond the simulation end date (%s).', ...
+            datestr(cf_relax_later_phase3_start_date_deaths), datestr(end_date_sim_deaths));
+end
+
+%  Counterfactual: RELAXATION 7 Days LATER Scenario 
+disp('Simulating counterfactual (Relaxation 7 Days Later) scenario for deaths...');
+cf_relax_later_model_deaths = simulate_sir_deaths_3phases(beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths, ...
+                                                      cf_relax_later_lockdown_day1_deaths_numeric, cf_relax_later_lockdown_day2_deaths_numeric, ...
+                                                      gamma_deaths, S0_deaths, I0_deaths, R0_deaths, N_deaths, ...
+                                                      num_days_simulation_deaths, tau_deaths, rho_deaths);
+disp('Relaxation 7 Days Later deaths scenario simulation complete.');
+
+% plot
+disp('Plotting deaths results...');
+figure('Name', 'Counterfactual Analysis: Deaths - Relaxation 7 Days Later');
+bar(all_dates_sim_deaths, reported_deaths_full_series, 'FaceColor', [0.9 0.7 0.7], 'EdgeColor', 'none', 'DisplayName', 'Reported Deaths');
+hold on;
+plot(all_dates_sim_deaths, original_model_deaths, 'b-', 'LineWidth', 2, 'DisplayName', 'Original Relaxation Timing Model (Deaths)');
+plot(all_dates_sim_deaths, cf_relax_later_model_deaths, 'k-.', 'LineWidth', 2, 'DisplayName', ['Relaxation ', num2str(days_to_shift_relaxation_deaths), ' Days LATER Model (Deaths)']);
+
+hold off;
+xlabel('Date');
+ylabel('New Deaths per Day');
+title(['COVID-19 Deaths: Original vs. Lockdown Relaxation ', num2str(days_to_shift_relaxation_deaths), ' Days LATER']);
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim_deaths, end_date_sim_deaths]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+% Analysis
+peak_original_deaths = max(original_model_deaths);
+peak_cf_relax_later_deaths = max(cf_relax_later_model_deaths);
+total_original_deaths = sum(original_model_deaths);
+total_cf_relax_later_deaths = sum(cf_relax_later_model_deaths);
+
+fprintf('\n--- Quantitative Comparison for Deaths (Relaxation %d Days Later) ---\n', days_to_shift_relaxation_deaths);
+fprintf('Peak Deaths (Original Relaxation Model): %.0f\n', peak_original_deaths);
+fprintf('Peak Deaths (%d Days Later Relaxation Model): %.0f\n', days_to_shift_relaxation_deaths, peak_cf_relax_later_deaths);
+
+fprintf('Total Deaths (Original Relaxation Model): %.0f\n', total_original_deaths);
+fprintf('Total Deaths (%d Days Later Relaxation Model): %.0f\n', days_to_shift_relaxation_deaths, total_cf_relax_later_deaths);
+fprintf('Change in Total Deaths: %.0f (%.2f%% of original)\n', total_cf_relax_later_deaths - total_original_deaths, ((total_cf_relax_later_deaths/total_original_deaths)-1)*100);
+
+disp('Counterfactual analysis for deaths complete.');
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% cases if lockdown RELAXATION was 7 days earlier %% 
+filename = 'england cases nation_newCasesBySpecimenDate.csv.xlsx';
+data = readtable(filename, 'Sheet', 'nation_newCasesBySpecimenDate');
+
+dates_reported = datetime(data.date);
+new_cases_reported = data.value;
+
+start_date_sim = datetime('2020-01-01');
+
+end_date_sim = datetime('2020-11-09'); 
+all_dates_sim = (start_date_sim:end_date_sim)';
+num_days_simulation = length(all_dates_sim);
+
+reported_cases_full_series = zeros(num_days_simulation, 1);
+[~, idx_in_all] = ismember(dates_reported, all_dates_sim);
+valid_idx_reported = idx_in_all(idx_in_all > 0);
+reported_cases_full_series(valid_idx_reported) = new_cases_reported(idx_in_all > 0);
+reported_cases_full_series(isnan(reported_cases_full_series)) = 0;
+
+N = 56000000; 
+I0_cases = 1; 
+R0_cases = 0;
+S0_cases = N - I0_cases - R0_cases;
+gamma_cases = 0.2; 
+
+beta1_fitted_cases = 0.284866;   
+beta2_fitted_cases = 0.112748;  
+beta3_fitted_cases = 0.262636;  
+
+fprintf('Using Fitted Beta Values:\nBeta1 (Cases): %f\nBeta2 (Cases): %f\nBeta3 (Cases): %f\n', beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases);
+
+original_phase2_start_cases_date = datetime('2020-04-17'); % This is when lockdown (beta2) starts
+original_phase3_start_cases_date = datetime('2020-07-01'); % This is when relaxation (beta3) starts
+
+original_lockdown_day1_cases_numeric = days(original_phase2_start_cases_date - start_date_sim);
+original_lockdown_day2_cases_numeric = days(original_phase3_start_cases_date - start_date_sim);
+
+% Simulating Original Lockdown Scenario (using fitted parameters)
+original_model_cases = simulate_sir_3betas(beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases, ...
+                                           original_lockdown_day1_cases_numeric, original_lockdown_day2_cases_numeric, ...
+                                           gamma_cases, S0_cases, I0_cases, R0_cases, N, num_days_simulation);
+disp('Original scenario simulation complete.');
+
+%Defining Counterfactual: RELAXATION 7 Days LATER ---
+disp('Defining counterfactual (RELAXATION 7 DAYS LATER) dates...');
+days_to_shift_relaxation = 7;
+
+% Phase 2 (lockdown) start date REMAINS THE SAME as original
+cf_relax_later_phase2_start_date = original_phase2_start_cases_date;
+
+% Phase 3 (relaxation) start date is SHIFTED LATER
+cf_relax_later_phase3_start_date = original_phase3_start_cases_date - days(days_to_shift_relaxation);
+
+% Conversion to numeric day counts for the simulation function
+cf_relax_later_lockdown_day1_numeric = days(cf_relax_later_phase2_start_date - start_date_sim); % This will be same as original_lockdown_day1_cases_numeric
+cf_relax_later_lockdown_day2_numeric = days(cf_relax_later_phase3_start_date - start_date_sim); % This is the key changed date
+
+fprintf('Counterfactual Phase 2 Start Date (Lockdown Start): %s (Day %d)\n', datestr(cf_relax_later_phase2_start_date), cf_relax_later_lockdown_day1_numeric);
+fprintf('Counterfactual Phase 3 Start Date (Relaxation Start - LATER): %s (Day %d)\n', datestr(cf_relax_later_phase3_start_date), cf_relax_later_lockdown_day2_numeric);
+
+% Checking if the shifted relaxation date goes beyond the simulation period
+if cf_relax_later_phase3_start_date > end_date_sim
+    warning('Shifted Phase 3 start date (%s) is beyond the simulation end date (%s). The third phase might be cut short or not appear fully.', ...
+            datestr(cf_relax_later_phase3_start_date), datestr(end_date_sim));
+end
+
+% Simulate Counterfactual: RELAXATION 7 Days LATER Scenario
+cf_relax_later_model_cases = simulate_sir_3betas(beta1_fitted_cases, beta2_fitted_cases, beta3_fitted_cases, ...
+                                     cf_relax_later_lockdown_day1_numeric, cf_relax_later_lockdown_day2_numeric, ...
+                                     gamma_cases, S0_cases, I0_cases, R0_cases, N, num_days_simulation);
+disp('Relaxation 7 Days Later scenario simulation complete.');
+
+% plot
+disp('Plotting results...');
+figure('Name', 'Counterfactual Analysis: Cases - Relaxation 7 Days Earlier'); 
+bar(all_dates_sim, reported_cases_full_series, 'FaceColor', [0.8 0.8 0.8], 'EdgeColor', 'none', 'DisplayName', 'Reported Cases');
+hold on;
+plot(all_dates_sim, original_model_cases, 'r-', 'LineWidth', 2, 'DisplayName', 'Original Relaxation Timing Model');
+plot(all_dates_sim, cf_relax_later_model_cases, 'b--', 'LineWidth', 2, 'DisplayName', ['Relaxation ', num2str(days_to_shift_relaxation), ' Days Earlier Model']); 
+
+
+
+hold off;
+xlabel('Date');
+ylabel('New Cases per Day');
+title(['COVID-19 Cases: Original vs. Lockdown Relaxation ', num2str(days_to_shift_relaxation), ' Days LATER']); 
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim, end_date_sim]);
+ylim([0 30000]); 
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+% Analysis
+peak_original_cases = max(original_model_cases);
+peak_cf_relax_later_cases = max(cf_relax_later_model_cases);
+total_original_cases = sum(original_model_cases);
+total_cf_relax_later_cases = sum(cf_relax_later_model_cases);
+
+fprintf('\n--- Quantitative Comparison for Cases (Relaxation %d Days Later) ---\n', days_to_shift_relaxation);
+fprintf('Peak Cases (Original Relaxation Model): %.0f\n', peak_original_cases);
+fprintf('Peak Cases (%d Days Later Relaxation Model): %.0f\n', days_to_shift_relaxation, peak_cf_relax_later_cases);
+
+
+fprintf('Total Cases (Original Relaxation Model): %.0f\n', total_original_cases);
+fprintf('Total Cases (%d Days Later Relaxation Model): %.0f\n', days_to_shift_relaxation, total_cf_relax_later_cases);
+fprintf('Change in Total Cases: %.0f (%.2f%% of original)\n', total_cf_relax_later_cases - total_original_cases, ((total_cf_relax_later_cases/total_original_cases)-1)*100);
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% %% Counterfactual Analysis: Admissions - Relaxation 7 Days earlier %%
+
+disp('Starting Counterfactual Analysis for Hospital Admissions (Relaxation Later)...');
+
+disp('Loading and preparing admissions data...');
+filename_adm = 'england healthcare nation_newAdmissions.csv.xlsx';
+data = readtable(filename_adm, 'Sheet', 'nation_newAdmissions');
+
+
+dates_reported_adm = datetime(data.date);
+admissions_reported_values = data.value;
+
+start_date_sim_adm = datetime('2020-01-01');
+
+end_date_sim_adm = datetime('2020-11-18'); 
+all_dates_sim_adm = (start_date_sim_adm:end_date_sim_adm)';
+num_days_simulation_adm = length(all_dates_sim_adm);
+
+reported_admissions_full_series = zeros(num_days_simulation_adm, 1);
+[~, idx_in_all_adm] = ismember(dates_reported_adm, all_dates_sim_adm);
+valid_idx_reported_adm = idx_in_all_adm(idx_in_all_adm > 0);
+reported_admissions_full_series(valid_idx_reported_adm) = admissions_reported_values(idx_in_all_adm > 0);
+reported_admissions_full_series(isnan(reported_admissions_full_series)) = 0;
+
+disp('Admissions data preparation complete.');
+
+
+disp('Defining original model parameters for admissions...');
+% initial conditions
+N_adm = 56000000;
+gamma_adm = 1/5; 
+I0_adm = 1;      
+R0_adm = 0;
+S0_adm = N_adm - I0_adm - R0_adm;
+
+
+beta1_fitted_adm = 0.287082;   
+beta2_fitted_adm = 0.169216;  
+beta3_fitted_adm = 0.232222;   
+disp('USING THE FOLLOWING FITTED PARAMETERS FOR ADMISSIONS (ensure these produced a good 3-phase fit):');
+fprintf('I0 (Admissions): %.0f\n', I0_adm);
+fprintf('Gamma (Admissions): %f\n', gamma_adm);
+fprintf('Beta1 (Admissions): %f\nBeta2 (Admissions): %f\nBeta3 (Admissions): %f\n', beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm);
+
+% Original lockdown dates from previous admissions script
+original_phase2_start_date_adm = datetime('2020-04-01');
+original_phase3_start_date_adm = datetime('2020-08-02');
+
+original_lockdown_day1_adm_numeric = days(original_phase2_start_date_adm - start_date_sim_adm);
+original_lockdown_day2_adm_numeric = days(original_phase3_start_date_adm - start_date_sim_adm);
+
+disp('Original parameters and dates for admissions defined.');
+
+% Original Lockdown Scenario for Admissions (using fitted parameters) 
+disp('Simulating original lockdown scenario for admissions...');
+original_model_admissions = simulate_sir_3betas(beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm, ...
+                                                original_lockdown_day1_adm_numeric, original_lockdown_day2_adm_numeric, ...
+                                                gamma_adm, S0_adm, I0_adm, R0_adm, N_adm, num_days_simulation_adm);
+disp('Original admissions scenario simulation complete.');
+
+%  Counterfactual: RELAXATION 7 Days LATER for Admissions 
+disp('Defining counterfactual (RELAXATION 7 DAYS LATER) dates for admissions...');
+days_to_shift_relaxation_adm = 7;
+
+% Phase 2 (lockdown) start date REMAINS THE SAME
+cf_relax_later_phase2_start_date_adm = original_phase2_start_date_adm;
+
+% Phase 3 (relaxation) start date is SHIFTED LATER
+cf_relax_later_phase3_start_date_adm = original_phase3_start_date_adm - days(days_to_shift_relaxation_adm);
+
+cf_relax_later_lockdown_day1_adm_numeric = days(cf_relax_later_phase2_start_date_adm - start_date_sim_adm);
+cf_relax_later_lockdown_day2_adm_numeric = days(cf_relax_later_phase3_start_date_adm - start_date_sim_adm);
+
+fprintf('Counterfactual Phase 2 Start Date (Lockdown Start - Admissions): %s (Day %d)\n', datestr(cf_relax_later_phase2_start_date_adm), cf_relax_later_lockdown_day1_adm_numeric);
+fprintf('Counterfactual Phase 3 Start Date (Relaxation Start - LATER - Admissions): %s (Day %d)\n', datestr(cf_relax_later_phase3_start_date_adm), cf_relax_later_lockdown_day2_adm_numeric);
+
+if cf_relax_later_phase3_start_date_adm > end_date_sim_adm
+    warning('Shifted Phase 3 start date for admissions (%s) is beyond the simulation end date (%s).', ...
+            datestr(cf_relax_later_phase3_start_date_adm), datestr(end_date_sim_adm));
+end
+
+%  Counterfactual: RELAXATION 7 Days LATER Scenario for Admissions ---
+disp('Simulating counterfactual (Relaxation 7 Days Later) scenario for admissions...');
+cf_relax_later_model_admissions = simulate_sir_3betas(beta1_fitted_adm, beta2_fitted_adm, beta3_fitted_adm, ...
+                                                      cf_relax_later_lockdown_day1_adm_numeric, cf_relax_later_lockdown_day2_adm_numeric, ...
+                                                      gamma_adm, S0_adm, I0_adm, R0_adm, N_adm, num_days_simulation_adm);
+disp('Relaxation 7 Days Later admissions scenario simulation complete.');
+
+% plot
+disp('Plotting admissions results...');
+figure('Name', 'Counterfactual Analysis: Admissions - Relaxation 7 Days Later');
+bar(all_dates_sim_adm, reported_admissions_full_series, 'FaceColor', [0.7 0.85 0.7], 'EdgeColor', 'none', 'DisplayName', 'Reported Admissions');
+hold on;
+plot(all_dates_sim_adm, original_model_admissions, 'b-', 'LineWidth', 2, 'DisplayName', 'Original SIR Model');
+plot(all_dates_sim_adm, cf_relax_later_model_admissions, 'm--', 'LineWidth', 2, 'DisplayName', ['Relaxation ', num2str(days_to_shift_relaxation_adm), ' Days Earlier ']);
+
+hold off;
+xlabel('Date');
+ylabel('New Hospital Admissions per Day');
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim_adm, end_date_sim_adm]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+% Analysis
+peak_original_admissions = max(original_model_admissions);
+peak_cf_relax_later_admissions = max(cf_relax_later_model_admissions);
+total_original_admissions = sum(original_model_admissions);
+total_cf_relax_later_admissions = sum(cf_relax_later_model_admissions);
+
+fprintf('\n--- Quantitative Comparison for Admissions (Relaxation %d Days Later) ---\n', days_to_shift_relaxation_adm);
+fprintf('Peak Admissions (Original Relaxation Model): %.0f\n', peak_original_admissions);
+fprintf('Peak Admissions (%d Days Later Relaxation Model): %.0f\n', days_to_shift_relaxation_adm, peak_cf_relax_later_admissions);
+
+fprintf('Total Admissions (Original Relaxation Model): %.0f\n', total_original_admissions);
+fprintf('Total Admissions (%d Days Later Relaxation Model): %.0f\n', days_to_shift_relaxation_adm, total_cf_relax_later_admissions);
+fprintf('Change in Total Admissions: %.0f (%.2f%% of original)\n', total_cf_relax_later_admissions - total_original_admissions, ((total_cf_relax_later_admissions/total_original_admissions)-1)*100);
+
+disp('Counterfactual analysis for admissions complete.');
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% %% Counterfactual Analysis: deaths - Relaxation 7 Days earlier %%
+
+
+disp('Loading and preparing death data...');
+filename = 'england deaths nation_newDailyNsoDeathsByDeathDate.csv.xlsx';
+data = readtable(filename, 'Sheet', 'nation_newDailyNsoDeathsByDeath');
+
+
+dates_reported_deaths = datetime(data.date);
+deaths_reported_values = data.value;
+
+start_date_sim_deaths = datetime('2020-01-01');
+
+end_date_sim_deaths = datetime('2020-11-16'); 
+all_dates_sim_deaths = (start_date_sim_deaths:end_date_sim_deaths)';
+num_days_simulation_deaths = length(all_dates_sim_deaths);
+
+reported_deaths_full_series = zeros(num_days_simulation_deaths, 1);
+[~, idx_in_all_deaths] = ismember(dates_reported_deaths, all_dates_sim_deaths);
+valid_idx_reported_deaths = idx_in_all_deaths(idx_in_all_deaths > 0);
+reported_deaths_full_series(valid_idx_reported_deaths) = deaths_reported_values(idx_in_all_deaths > 0);
+reported_deaths_full_series(isnan(reported_deaths_full_series)) = 0;
+
+disp('Death data preparation complete.');
+
+% initial conditions
+disp('Defining original model parameters for deaths...');
+
+N_deaths = 56e6;
+gamma_deaths = 1/5;    
+tau_deaths = 8;
+rho_deaths = 0.0157;
+I0_deaths = 1;        
+R0_deaths = 0;
+S0_deaths = N_deaths - I0_deaths - R0_deaths;
+
+beta1_fitted_val_deaths = 0.346880;  
+beta2_fitted_val_deaths = 0.170214;  
+beta3_fitted_val_deaths = 0.260424;   
+disp('USING THE FOLLOWING FITTED PARAMETERS FOR DEATHS (ensure these produced a good 3-phase fit):');
+fprintf('I0 (Deaths): %.0f\n', I0_deaths);
+fprintf('Gamma (Deaths): %f\n', gamma_deaths);
+fprintf('Beta1 (Deaths): %f\nBeta2 (Deaths): %f\nBeta3 (Deaths): %f\n', beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths);
+
+% Original lockdown dates from previous deaths
+original_phase2_start_date_deaths = datetime('2020-03-30');
+original_phase3_start_date_deaths = datetime('2020-08-09');
+
+original_lockdown_day1_deaths_numeric = days(original_phase2_start_date_deaths - start_date_sim_deaths);
+original_lockdown_day2_deaths_numeric = days(original_phase3_start_date_deaths - start_date_sim_deaths);
+
+disp('Original parameters and dates for deaths defined.');
+
+%  Original Lockdown Scenario for Deaths (using fitted parameters) 
+disp('Simulating original lockdown scenario for deaths...');
+original_model_deaths = simulate_sir_deaths_3phases(beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths, ...
+                                                original_lockdown_day1_deaths_numeric, original_lockdown_day2_deaths_numeric, ...
+                                                gamma_deaths, S0_deaths, I0_deaths, R0_deaths, N_deaths, ...
+                                                num_days_simulation_deaths, tau_deaths, rho_deaths);
+disp('Original deaths scenario simulation complete.');
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+% Counterfactual: RELAXATION 7 Days LATER for Deaths 
+disp('Defining counterfactual (RELAXATION 7 DAYS LATER) dates for deaths...');
+days_to_shift_relaxation_deaths = 7;
+
+% Phase 2 (lockdown) start date is the same
+cf_relax_later_phase2_start_date_deaths = original_phase2_start_date_deaths;
+
+% Phase 3 (relaxation) start date is SHIFTED LATER
+cf_relax_later_phase3_start_date_deaths = original_phase3_start_date_deaths - days(days_to_shift_relaxation_deaths);
+
+cf_relax_later_lockdown_day1_deaths_numeric = days(cf_relax_later_phase2_start_date_deaths - start_date_sim_deaths);
+cf_relax_later_lockdown_day2_deaths_numeric = days(cf_relax_later_phase3_start_date_deaths - start_date_sim_deaths);
+
+fprintf('Counterfactual Phase 2 Start Date (Lockdown Start - Deaths): %s (Day %d)\n', datestr(cf_relax_later_phase2_start_date_deaths), cf_relax_later_lockdown_day1_deaths_numeric);
+fprintf('Counterfactual Phase 3 Start Date (Relaxation Start - LATER - Deaths): %s (Day %d)\n', datestr(cf_relax_later_phase3_start_date_deaths), cf_relax_later_lockdown_day2_deaths_numeric);
+
+if cf_relax_later_phase3_start_date_deaths > end_date_sim_deaths
+    warning('Shifted Phase 3 start date for deaths (%s) is beyond the simulation end date (%s).', ...
+            datestr(cf_relax_later_phase3_start_date_deaths), datestr(end_date_sim_deaths));
+end
+
+% Counterfactual: RELAXATION 7 Days LATER Scenario for Deaths 
+disp('Simulating counterfactual (Relaxation 7 Days Later) scenario for deaths...');
+cf_relax_later_model_deaths = simulate_sir_deaths_3phases(beta1_fitted_val_deaths, beta2_fitted_val_deaths, beta3_fitted_val_deaths, ...
+                                                      cf_relax_later_lockdown_day1_deaths_numeric, cf_relax_later_lockdown_day2_deaths_numeric, ...
+                                                      gamma_deaths, S0_deaths, I0_deaths, R0_deaths, N_deaths, ...
+                                                      num_days_simulation_deaths, tau_deaths, rho_deaths);
+disp('Relaxation 7 Days Later deaths scenario simulation complete.');
+
+% Plot
+disp('Plotting deaths results...');
+figure('Name', 'Counterfactual Analysis: Deaths - Relaxation 7 Days Later');
+bar(all_dates_sim_deaths, reported_deaths_full_series, 'FaceColor', [0.9 0.7 0.7], 'EdgeColor', 'none', 'DisplayName', 'Reported Deaths');
+hold on;
+plot(all_dates_sim_deaths, original_model_deaths, 'b-', 'LineWidth', 2, 'DisplayName', 'Original Relaxation Timing Model (Deaths)');
+plot(all_dates_sim_deaths, cf_relax_later_model_deaths, 'k-.', 'LineWidth', 2, 'DisplayName', ['Relaxation ', num2str(days_to_shift_relaxation_deaths), ' Days LATER Model (Deaths)']);
+
+hold off;
+xlabel('Date');
+ylabel('New Deaths per Day');
+title(['COVID-19 Deaths: Original vs. Lockdown Relaxation ', num2str(days_to_shift_relaxation_deaths), ' Days LATER']);
+legend('show', 'Location', 'northwest');
+xlim([start_date_sim_deaths, end_date_sim_deaths]);
+datetick('x', 'mmm dd', 'keeplimits', 'keepticks');
+grid off;
+
+% Analysis
+peak_original_deaths = max(original_model_deaths);
+peak_cf_relax_later_deaths = max(cf_relax_later_model_deaths);
+total_original_deaths = sum(original_model_deaths);
+total_cf_relax_later_deaths = sum(cf_relax_later_model_deaths);
+
+fprintf('\n--- Quantitative Comparison for Deaths (Relaxation %d Days Later) ---\n', days_to_shift_relaxation_deaths);
+fprintf('Peak Deaths (Original Relaxation Model): %.0f\n', peak_original_deaths);
+fprintf('Peak Deaths (%d Days Later Relaxation Model): %.0f\n', days_to_shift_relaxation_deaths, peak_cf_relax_later_deaths);
+
+fprintf('Total Deaths (Original Relaxation Model): %.0f\n', total_original_deaths);
+fprintf('Total Deaths (%d Days Later Relaxation Model): %.0f\n', days_to_shift_relaxation_deaths, total_cf_relax_later_deaths);
+fprintf('Change in Total Deaths: %.0f (%.2f%% of original)\n', total_cf_relax_later_deaths - total_original_deaths, ((total_cf_relax_later_deaths/total_original_deaths)-1)*100);
+
+disp('Counterfactual analysis for deaths complete.');
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+% SIRV Model
+% Death Data (
+filename_deaths = 'england deaths nation_newDailyNsoDeathsByDeathDate.csv.xlsx';
+data_table_deaths = readtable(filename_deaths); 
+dates_reported_deaths = datetime(data_table_deaths.date);
+deaths_reported_values = data_table_deaths.value;
+
+% Vaccination Data
+vacc_filename = 'nation_newPeopleVaccinatedFirstDoseByVaccinationDate.csv.xlsx';
+vacc_data_table = readtable(vacc_filename);
+vacc_dates_reported = datetime(vacc_data_table.date);
+daily_first_doses_reported = vacc_data_table.value;
+daily_first_doses_reported(isnan(daily_first_doses_reported)) = 0;
+
+%  Simulation Period (extended to cover vaccination period)
+start_date_sim = datetime('2020-01-01');
+end_date_sim = datetime('2023-01-01'); %
+all_dates_sim = (start_date_sim:end_date_sim)';
+num_days_simulation = length(all_dates_sim);
+
+% Aligning Deaths Simulation Period
+reported_deaths_full_series = zeros(num_days_simulation, 1);
+[lia_deaths, locb_deaths] = ismember(dates_reported_deaths, all_dates_sim);
+reported_deaths_full_series(locb_deaths(lia_deaths)) = deaths_reported_values(lia_deaths);
+
+% Align Vaccination to Simulation Period
+daily_vaccinations_full_series = zeros(num_days_simulation, 1);
+[lia_vacc, locb_vacc] = ismember(vacc_dates_reported, all_dates_sim);
+daily_vaccinations_full_series(locb_vacc(lia_vacc)) = daily_first_doses_reported(lia_vacc);
+
+disp('Data preparation complete.');
+
+% Initial parameters
+disp('Defining model parameters...');
+N_population = 56e6;       
+gamma_rate = 1/5;          
+tau_death_lag = 8;         
+ rho_ifr =  0.0157
+
+% Initial conditions for SIRV model
+I0_initial = 10; 
+R0_initial = 0;
+V0_initial = 0; % No one vaccinated at the start
+S0_initial = N_population - I0_initial - R0_initial - V0_initial;
+
+
+beta1_base = 0.3341;   
+beta2_base = 0.1568;   
+beta3_base = 0.3119;  
+
+% Original lockdown phase change days 
+original_phase2_start_date = datetime('2020-03-30'); 
+original_phase3_start_date = datetime('2020-08-09'); 
+lockdown_day1_original_numeric = days(original_phase2_start_date - start_date_sim);
+lockdown_day2_original_numeric = days(original_phase3_start_date - start_date_sim);
+
+disp('Model parameters defined.');
+
+%Scenarios
+disp('Defining scenarios...');
+
+scenarios = {};
+
+rho_ifr_baseline_effective = 0.010; % Lower effective IFR for baseline with vaccines
+rho_ifr_no_vaccine_higher = 0.020;  % Higher IFR for scenario with no vaccines
+
+% Scenario 1: Baseline (Observed Lockdowns + Observed Vaccinations)
+scenarios{1}.name = 'Baseline (Lockdowns + Observed Vaccine)';
+scenarios{1}.beta1 = beta1_base;
+scenarios{1}.beta2 = beta2_base;
+scenarios{1}.beta3 = beta3_base;
+scenarios{1}.lockdown_day1 = lockdown_day1_original_numeric;
+scenarios{1}.lockdown_day2 = lockdown_day2_original_numeric;
+scenarios{1}.vaccinations = daily_vaccinations_full_series;
+scenarios{1}.rho_ifr = rho_ifr_baseline_effective; 
+scenarios{1}.color = 'b';
+scenarios{1}.linestyle = '-';
+
+% Scenario 2: No Vaccinations (Observed Lockdowns, Zero Vaccine)
+scenarios{2}.name = 'No Vaccine (Lockdowns Only)';
+scenarios{2}.beta1 = beta1_base;
+scenarios{2}.beta2 = beta2_base;
+scenarios{2}.beta3 = beta3_base;
+scenarios{2}.lockdown_day1 = lockdown_day1_original_numeric;
+scenarios{2}.lockdown_day2 = lockdown_day2_original_numeric;
+scenarios{2}.vaccinations = zeros(num_days_simulation, 1); % because zero vaccinations
+scenarios{2}.rho_ifr = rho_ifr_no_vaccine_higher; % Use higher IFR
+scenarios{2}.color = 'r';
+scenarios{2}.linestyle = '--';
+
+% Scenario 3: Earlier Lockdown (7 days) + Observed Vaccinations
+days_shift_earlier = 7;
+scenarios{3}.name = ['Earlier Lockdown (-', num2str(days_shift_earlier), 'd) + Observed Vaccine'];
+scenarios{3}.beta1 = beta1_base;
+scenarios{3}.beta2 = beta2_base; 
+scenarios{3}.beta3 = beta3_base;
+scenarios{3}.lockdown_day1 = max(0, lockdown_day1_original_numeric - days_shift_earlier);
+scenarios{3}.lockdown_day2 = max(0, lockdown_day2_original_numeric - days_shift_earlier); 
+scenarios{3}.vaccinations = daily_vaccinations_full_series;
+scenarios{3}.rho_ifr = rho_ifr_baseline_effective; % Use lower IFR consistent with baseline vaccine presence
+scenarios{3}.color = 'g';
+scenarios{3}.linestyle = '-.';
+
+% Scenario 4: Stronger Lockdown (beta2 reduced by 20%) + Observed Vaccinations
+reduction_factor_beta2 = 0.8; % 20% reduction
+scenarios{4}.name = ['Stronger Lockdown (',num2str((1-reduction_factor_beta2)*100),'%% lower beta2) + Obs. Vaccine'];
+scenarios{4}.beta1 = beta1_base;
+scenarios{4}.beta2 = beta2_base * reduction_factor_beta2; 
+scenarios{4}.beta3 = beta3_base;
+scenarios{4}.lockdown_day1 = lockdown_day1_original_numeric;
+scenarios{4}.lockdown_day2 = lockdown_day2_original_numeric;
+scenarios{4}.vaccinations = daily_vaccinations_full_series;
+scenarios{4}.rho_ifr = rho_ifr_baseline_effective; % Use lower IFR consistent with baseline vaccine presence
+scenarios{4}.color = [0.9290 0.6940 0.1250]; 
+scenarios{4}.linestyle = ':';
+
+disp('Scenarios defined.');
+
+% Running Simulations
+disp('Running simulations...');
+results = cell(length(scenarios), 1);
+
+for i = 1:length(scenarios)
+    fprintf('Simulating: %s\n', scenarios{i}.name);
+    [daily_deaths, S, I, R, V, daily_cases] = simulate_sirv_deaths_3phases_vacc(...
+        scenarios{i}.beta1, scenarios{i}.beta2, scenarios{i}.beta3, ...
+        scenarios{i}.lockdown_day1, scenarios{i}.lockdown_day2, ...
+        gamma_rate, S0_initial, I0_initial, R0_initial, V0_initial, N_population, ...
+        num_days_simulation, tau_death_lag, scenarios{i}.rho_ifr, scenarios{i}.vaccinations); 
+    
+    results{i}.daily_deaths = daily_deaths;
+    results{i}.cumulative_deaths = cumsum(daily_deaths);
+    results{i}.daily_cases = daily_cases;
+    results{i}.cumulative_cases = cumsum(daily_cases);
+    results{i}.S = S;
+    results{i}.I = I;
+    results{i}.R = R;
+    results{i}.V = V;
+end
+disp('Simulations complete.');
+
+% Plotting cumulative deaths
+disp('Plotting results...');
+figure('Name', 'Comparative Analysis: Cumulative Deaths under Different Intervention Strategies');
+hold on;
+for i = 1:length(scenarios)
+    plot(all_dates_sim, results{i}.cumulative_deaths, ...
+        'DisplayName', scenarios{i}.name, ...
+        'Color', scenarios{i}.color, ...
+        'LineStyle', scenarios{i}.linestyle, ...
+        'LineWidth', 2);
+end
+hold off;
+xlabel('Date');
+startDate = dateshift(start_date_sim, 'start', 'month');
+endDate = end_date_sim;
+threeMonthTicks = startDate:calmonths(3):endDate;
+xticks(threeMonthTicks);
+xtickformat('MMM yyyy');
+ylabel('Cumulative Deaths');
+legend('show', 'Location', 'northwest');
+grid off; 
+
+
+% total deaths for each scenario
+fprintf('\n--- Total Deaths by Scenario ---\n');
+for i = 1:length(scenarios)
+    fprintf('%s: %.0f\n', scenarios{i}.name, results{i}.cumulative_deaths(end));
+end
+
+disp('Analysis complete.');
+
+
+% SIRV  Function... 
+function [daily_deaths_calc, S_out, I_out, R_out, V_out, daily_new_cases_calc] = simulate_sirv_deaths_3phases_vacc(beta1_sim, beta2_sim, beta3_sim, lockdown_day1_sim, lockdown_day2_sim, gamma_sim, S0_sim, I0_sim, R0_sim, V0_sim, N_sim, num_days_sim_input, tau_sim, rho_ifr_scenario_specific, daily_vaccinations_series_sim) % rho_ifr is now an input
+    
+    y0_sim = [S0_sim; I0_sim; R0_sim; V0_sim]; 
+    
+    
+    t_span_sim = 0:num_days_sim_input; 
+
+    options_ode = odeset('RelTol', 1e-6, 'AbsTol', 1e-6, 'NonNegative', 1:4);
+
+   
+    [T_sol, y_sirv_solution] = ode45(@(t,y_ode) sirv_ode_system_3phases(t, y_ode, ...
+                                                              beta1_sim, beta2_sim, beta3_sim, ...
+                                                              N_sim, lockdown_day1_sim, lockdown_day2_sim, ...
+                                                              gamma_sim, daily_vaccinations_series_sim), ...
+                                                              t_span_sim, y0_sim, options_ode);
+
+    
+    S_out_full = y_sirv_solution(:,1);
+    I_out_full = y_sirv_solution(:,2);
+    R_out_full = y_sirv_solution(:,3);
+    V_out_full = y_sirv_solution(:,4);
+
+    S_out = S_out_full(1:num_days_sim_input);
+    I_out = I_out_full(1:num_days_sim_input);
+    R_out = R_out_full(1:num_days_sim_input);
+    V_out = V_out_full(1:num_days_sim_input);
+    
+    S_at_day_start = S_out_full(1:end-1); 
+    S_at_day_end   = S_out_full(2:end);   
+    V_at_day_start = V_out_full(1:end-1);
+    V_at_day_end   = V_out_full(2:end);
+    R_at_day_start = R_out_full(1:end-1);
+    R_at_day_end   = R_out_full(2:end);
+
+    newly_vacc_during_day = max(0, V_at_day_end - V_at_day_start);
+    total_decrease_S_during_day = max(0, S_at_day_start - S_at_day_end);
+    
+    daily_new_cases_calc = max(0, total_decrease_S_during_day - newly_vacc_during_day);
+    daily_removals_calc = max(0, R_at_day_end - R_at_day_start);
+    
+   
+    if length(daily_new_cases_calc) > num_days_sim_input
+        daily_new_cases_calc = daily_new_cases_calc(1:num_days_sim_input);
+        daily_removals_calc = daily_removals_calc(1:num_days_sim_input);
+    end
+    
+    daily_deaths_calc = zeros(num_days_sim_input, 1);
+    if num_days_sim_input > tau_sim
+        
+        for k_day_idx = tau_sim : (num_days_sim_input - 1) 
+            source_removal_idx = k_day_idx - tau_sim; 
+            if (source_removal_idx + 1) <= length(daily_removals_calc) 
+               
+                daily_deaths_calc(k_day_idx + 1) = rho_ifr_scenario_specific * daily_removals_calc(source_removal_idx + 1);
+            end
+        end
+    end
+    daily_deaths_calc = reshape(daily_deaths_calc, [], 1);
+end
+
+
+%  SIRV ODE45
+
+function dydt = sirv_ode_system_3phases(t_ode, y_ode, ...
+                                    beta1_fn, beta2_fn, beta3_fn, ...
+                                    N_fn, lockdown_day1_fn, lockdown_day2_fn, ...
+                                    gamma_fn, daily_vaccinations_series_fn)
+    
+    S_val = y_ode(1);
+    I_val = y_ode(2);
+    
+    current_beta_val = beta1_fn; 
+    if t_ode >= lockdown_day1_fn && t_ode < lockdown_day2_fn % Phase 2
+        current_beta_val = beta2_fn;
+    elseif t_ode >= lockdown_day2_fn % Phase 3
+        current_beta_val = beta3_fn;
+    end
+    
+    current_day_idx_for_vacc = floor(t_ode) + 1;
+    
+    nu_vaccination_rate = 0;
+    if current_day_idx_for_vacc >= 1 && current_day_idx_for_vacc <= length(daily_vaccinations_series_fn)
+        
+        nu_vaccination_rate = daily_vaccinations_series_fn(current_day_idx_for_vacc);
+    end
+    
+    nu_vaccination_rate = min(nu_vaccination_rate, S_val); 
+
+    dSdt = -current_beta_val * S_val * I_val / N_fn - nu_vaccination_rate;
+    dIdt =  current_beta_val * S_val * I_val / N_fn - gamma_fn * I_val;
+    dRdt =  gamma_fn * I_val;
+    dVdt =  nu_vaccination_rate;
+    
+    dydt = [dSdt; dIdt; dRdt; dVdt];
+    dydt = reshape(dydt,4,1); 
+end
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%% Lockdown/Relaxation timing (-7, 0, +7, etc.) against Peak and total cases/admissions/deaths 
+
+%  Initial Parameters
+N_population = 56000000;
+gamma_rate = 0.2; % Recovery rate (1/average infectious period)
+I0_initial = 1; % Initial number of infected individuals
+R0_initial = 0; % Initial number of recovered individuals
+S0_initial = N_population - I0_initial - R0_initial;
+
+start_date_sim = datetime('2020-01-01');
+
+end_date_sim_overall = datetime('2022-12-02');
+num_days_simulation = days(end_date_sim_overall - start_date_sim) + 1;
+all_dates_sim_overall = start_date_sim + days(0:num_days_simulation-1);
+
+tau_deaths_lag = 8; % Lag from infection/removal to death
+rho_ifr = 0.0157;   % Infection Fatality Rate
+
+disp('--- Model Parameters Defined ---');
+
+
+% Beta Schedule for CASES
+beta_schedule_cases = [];
+beta_schedule_cases(end+1).start_day_offset = 0;                                            beta_schedule_cases(end).beta_value = 0.284866; % Initial
+beta_schedule_cases(end+1).start_day_offset = days(datetime('2020-04-17')-start_date_sim); beta_schedule_cases(end).beta_value = 0.112748; % Phase 2 (Lockdown 1)
+beta_schedule_cases(end+1).start_day_offset = days(datetime('2020-07-01')-start_date_sim); beta_schedule_cases(end).beta_value = 0.262636; % Phase 3 (Summer Easing 2020)
+% Add more phases for subsequent waves/interventions
+beta_schedule_cases(end+1).start_day_offset = days(datetime('2020-11-12')-start_date_sim); beta_schedule_cases(end).beta_value = 0.35; % Autumn Wave 2020
+beta_schedule_cases(end+1).start_day_offset = days(datetime('2021-01-05')-start_date_sim); beta_schedule_cases(end).beta_value = 0.15; % Lockdown Winter 2021
+beta_schedule_cases(end+1).start_day_offset = days(datetime('2021-04-12')-start_date_sim); beta_schedule_cases(end).beta_value = 0.28; % Spring Easing 2021
+beta_schedule_cases(end+1).start_day_offset = days(datetime('2021-07-19')-start_date_sim); beta_schedule_cases(end).beta_value = 0.40; % Summer Wave 2021
+
+
+% Beta Schedule for ADMISSIONS
+beta_schedule_admissions = [];
+beta_schedule_admissions(end+1).start_day_offset = 0;                                            beta_schedule_admissions(end).beta_value = 0.287082;
+beta_schedule_admissions(end+1).start_day_offset = days(datetime('2020-04-01')-start_date_sim); beta_schedule_admissions(end).beta_value = 0.169216;
+beta_schedule_admissions(end+1).start_day_offset = days(datetime('2020-08-02')-start_date_sim); beta_schedule_admissions(end).beta_value = 0.232222;
+beta_schedule_admissions(end+1).start_day_offset = days(datetime('2020-10-15')-start_date_sim); beta_schedule_admissions(end).beta_value = 0.33;
+beta_schedule_admissions(end+1).start_day_offset = days(datetime('2021-01-05')-start_date_sim); beta_schedule_admissions(end).beta_value = 0.16;
+beta_schedule_admissions(end+1).start_day_offset = days(datetime('2021-04-12')-start_date_sim); beta_schedule_admissions(end).beta_value = 0.27;
+beta_schedule_admissions(end+1).start_day_offset = days(datetime('2021-07-19')-start_date_sim); beta_schedule_admissions(end).beta_value = 0.38;
+
+
+
+% Beta Schedule for DEATHS
+beta_schedule_deaths = [];
+beta_schedule_deaths(end+1).start_day_offset = 0;                                            beta_schedule_deaths(end).beta_value = 0.346880;
+beta_schedule_deaths(end+1).start_day_offset = days(datetime('2020-03-30')-start_date_sim); beta_schedule_deaths(end).beta_value = 0.170214;
+beta_schedule_deaths(end+1).start_day_offset = days(datetime('2020-08-09')-start_date_sim); beta_schedule_deaths(end).beta_value = 0.260424;
+beta_schedule_deaths(end+1).start_day_offset = days(datetime('2020-10-15')-start_date_sim); beta_schedule_deaths(end).beta_value = 0.30;
+beta_schedule_deaths(end+1).start_day_offset = days(datetime('2021-01-05')-start_date_sim); beta_schedule_deaths(end).beta_value = 0.14;
+beta_schedule_deaths(end+1).start_day_offset = days(datetime('2021-04-12')-start_date_sim); beta_schedule_deaths(end).beta_value = 0.25;
+beta_schedule_deaths(end+1).start_day_offset = days(datetime('2021-07-19')-start_date_sim); beta_schedule_deaths(end).beta_value = 0.36;
+
+disp('--- Multi-Phase Beta Schedules Defined ---');
+
+% ODE Solver Function for Multi-Phase Beta
+function dydt = sir_multi_phase_ode(t_ode, y_ode, N_fn, gamma_fn, beta_schedule_fn)
+    current_beta_val = beta_schedule_fn(1).beta_value; % Default to first beta
+    for k = 1:length(beta_schedule_fn)
+        if t_ode >= beta_schedule_fn(k).start_day_offset
+            current_beta_val = beta_schedule_fn(k).beta_value;
+        else
+            break; % Assumes schedule is sorted by start_day_offset
+        end
+    end
+    S_val = y_ode(1); I_val = y_ode(2);
+    dSdt = -current_beta_val * S_val * I_val / N_fn;
+    dIdt =  current_beta_val * S_val * I_val / N_fn - gamma_fn * I_val;
+    dRdt =  gamma_fn * I_val;
+    dydt = [dSdt; dIdt; dRdt];
+end
+
+% Simulation Function for Daily New Cases/Admissions (Multi-Wave)
+function daily_outputs = simulate_sir_cases_adms_multi_wave(beta_schedule_sim, gamma_sim, S0_sim, I0_sim, R0_sim, N_sim, num_days_sim_func)
+    y0_sim = [S0_sim; I0_sim; R0_sim];
+    t_span_sim = 0:num_days_sim_func-1;
+    options_ode = odeset('RelTol', 1e-6, 'AbsTol', 1e-6, 'NonNegative', [1,2,3]);
+    
+    [T_sol, y_sir_solution] = ode45(@(t,y_ode) sir_multi_phase_ode(t, y_ode, N_sim, gamma_sim, beta_schedule_sim), t_span_sim, y0_sim, options_ode);
+    
+    S_values = y_sir_solution(:,1);
+    % Calculating daily new infections (approximated by change in S)
+    % This represents the flux into the I compartment from S
+    daily_outputs = zeros(num_days_sim_func,1);
+    if num_days_sim_func >= 1
+        % Infections occurring during day 0 (between t=0 and t=1)
+        daily_outputs(1) = S0_sim - S_values(1); 
+        if num_days_sim_func > 1
+           
+             for day_idx = 2:num_days_sim_func
+                daily_outputs(day_idx) = S_values(day_idx-1) - S_values(day_idx);
+             end
+        end
+    end
+    daily_outputs = max(0, daily_outputs);
+    daily_outputs = reshape(daily_outputs, [], 1);
+end
+
+% Simulation Function for Daily Deaths (Multi-Wave)
+function daily_deaths_calc = simulate_sir_deaths_multi_wave(beta_schedule_sim, gamma_sim, S0_sim, I0_sim, R0_sim, N_sim, num_days_sim_func, tau_sim, rho_sim)
+    y0_sim = [S0_sim; I0_sim; R0_sim];
+    t_span_sim = 0:num_days_sim_func-1;
+    options_ode_deaths = odeset('RelTol', 1e-6, 'AbsTol', 1e-6, 'NonNegative', [1,2,3]);
+    
+    [T_sol, y_sir_solution] = ode45(@(t,y_ode) sir_multi_phase_ode(t, y_ode, N_sim, gamma_sim, beta_schedule_sim), t_span_sim, y0_sim, options_ode_deaths);
+    
+    daily_removals_calc = zeros(num_days_sim_func,1);
+    R_values = y_sir_solution(:,3); % R values at the end of each day t=0, 1, ..., num_days_sim_func-1
+    
+    if num_days_sim_func >= 1
+        % R_values(1) is R at t=1 (end of day 0). R0_sim is R at t=0.
+        daily_removals_calc(1) = R_values(1) - R0_sim;
+        if num_days_sim_func > 1
+           
+            for day_idx = 2:num_days_sim_func
+                daily_removals_calc(day_idx) = R_values(day_idx) - R_values(day_idx-1);
+            end
+        end
+    end
+    daily_removals_calc = max(0, daily_removals_calc);
+
+    daily_deaths_calc = zeros(num_days_sim_func,1);
+    if num_days_sim_func > tau_sim
+       
+        valid_indices_removals = 1:(num_days_sim_func-tau_sim);
+        daily_deaths_calc((tau_sim+1):num_days_sim_func) = rho_sim * daily_removals_calc(valid_indices_removals);
+    end
+    daily_deaths_calc = reshape(daily_deaths_calc, [], 1);
+    daily_deaths_calc = max(0, daily_deaths_calc);
+end
+
+% FIGURE 1: Impact of Shifting Intervention Periods
+shifts = [-21, -14, -7, 0, 7, 14, 21]; % Days to shift all intervention start dates
+num_shifts = length(shifts);
+
+peak_cases_fig1 = zeros(1, num_shifts); total_cases_fig1 = zeros(1, num_shifts);
+peak_adms_fig1 = zeros(1, num_shifts); total_adms_fig1 = zeros(1, num_shifts);
+peak_deaths_fig1 = zeros(1, num_shifts); total_deaths_fig1 = zeros(1, num_shifts);
+
+
+baseline_daily_cases = [];
+baseline_daily_adms = [];
+baseline_daily_deaths = [];
+
+fprintf('\n--- Data Generation for Figure 1 (Multi-Wave Shift Analysis) ---\n');
+for i = 1:num_shifts
+    shift_days = shifts(i);
+    fprintf('Simulating for intervention shift: %d days\n', shift_days);
+
+    % Apply shift to beta 
+   
+    current_beta_schedule_cases = beta_schedule_cases;
+    for k=2:length(current_beta_schedule_cases)
+        current_beta_schedule_cases(k).start_day_offset = beta_schedule_cases(k).start_day_offset + shift_days;
+    end
+    current_beta_schedule_admissions = beta_schedule_admissions;
+    for k=2:length(current_beta_schedule_admissions)
+        current_beta_schedule_admissions(k).start_day_offset = beta_schedule_admissions(k).start_day_offset + shift_days;
+    end
+    current_beta_schedule_deaths = beta_schedule_deaths;
+    for k=2:length(current_beta_schedule_deaths)
+        current_beta_schedule_deaths(k).start_day_offset = beta_schedule_deaths(k).start_day_offset + shift_days;
+    end
+    
+    % Cases
+    daily_out_c = simulate_sir_cases_adms_multi_wave(current_beta_schedule_cases, gamma_rate, S0_initial, I0_initial, R0_initial, N_population, num_days_simulation);
+    peak_cases_fig1(i) = max(daily_out_c);
+    total_cases_fig1(i) = sum(daily_out_c);
+    if shift_days == 0, baseline_daily_cases = daily_out_c; end
+
+    % Admissions
+    daily_out_a = simulate_sir_cases_adms_multi_wave(current_beta_schedule_admissions, gamma_rate, S0_initial, I0_initial, R0_initial, N_population, num_days_simulation);
+    peak_adms_fig1(i) = max(daily_out_a);
+    total_adms_fig1(i) = sum(daily_out_a);
+    if shift_days == 0, baseline_daily_adms = daily_out_a; end
+    
+    % Deaths
+    daily_out_d = simulate_sir_deaths_multi_wave(current_beta_schedule_deaths, gamma_rate, S0_initial, I0_initial, R0_initial, N_population, num_days_simulation, tau_deaths_lag, rho_ifr);
+    peak_deaths_fig1(i) = max(daily_out_d);
+    total_deaths_fig1(i) = sum(daily_out_d);
+    if shift_days == 0, baseline_daily_deaths = daily_out_d; end
+end
+
+fprintf('\nFigure 1 Data (Absolute Values - Multi-Wave Highest Peak & Total):\n');
+fprintf('Shifts (days): %s\n', mat2str(shifts));
+fprintf('Highest Peak Cases: %s\n', mat2str(round(peak_cases_fig1)));
+fprintf('Total Cases: %s\n', mat2str(round(total_cases_fig1)));
+fprintf('Highest Peak Admissions: %s\n', mat2str(round(peak_adms_fig1)));
+fprintf('Total Admissions: %s\n', mat2str(round(total_adms_fig1)));
+fprintf('Highest Peak Deaths: %s\n', mat2str(round(peak_deaths_fig1)));
+fprintf('Total Deaths: %s\n', mat2str(round(total_deaths_fig1)));
+
+%  Plotting Figure 1 
+% These plots show how the highest peak and total counts 
+% Figure 1a: Peak Cases
+figure('Name', 'Figure 1a: Impact on Highest Peak Daily Cases (Multi-Wave)');
+plot(shifts, peak_cases_fig1, '-o', 'LineWidth', 1.5, 'MarkerSize', 6);
+title('Impact of Shifting Interventions on Highest Peak Daily Cases (Multi-Wave)');
+ylabel('Highest Peak Daily Cases'); xlabel('Shift in Intervention Timing (Days)'); grid off; ax = gca; ax.XTick = shifts;
+
+% Figure 1b: Total Cases
+figure('Name', 'Figure 1b: Impact on Total Cases (Multi-Wave)');
+plot(shifts, total_cases_fig1, '-x', 'LineWidth', 1.5, 'MarkerSize', 6, 'Color', [0.8500 0.3250 0.0980]);
+title('Impact of Shifting Interventions on Total Cases (Multi-Wave)');
+ylabel('Total Cases'); xlabel('Shift in Intervention Timing (Days)'); grid off; ax = gca; ax.XTick = shifts;
+
+% Figure 1c: Peak Admissions
+figure('Name', 'Figure 1c: Impact on Highest Peak Daily Admissions (Multi-Wave)');
+plot(shifts, peak_adms_fig1, '-o', 'LineWidth', 1.5, 'MarkerSize', 6);
+title('Impact of Shifting Interventions on Highest Peak Daily Admissions (Multi-Wave)');
+ylabel('Highest Peak Daily Admissions'); xlabel('Shift in Intervention Timing (Days)'); grid off; ax = gca; ax.XTick = shifts;
+
+% Figure 1d: Total Admissions
+figure('Name', 'Figure 1d: Impact on Total Admissions (Multi-Wave)');
+plot(shifts, total_adms_fig1, '-x', 'LineWidth', 1.5, 'MarkerSize', 6, 'Color', [0.8500 0.3250 0.0980]);
+title('Impact of Shifting Interventions on Total Admissions (Multi-Wave)');
+ylabel('Total Admissions'); xlabel('Shift in Intervention Timing (Days)'); grid off; ax = gca; ax.XTick = shifts;
+
+% Figure 1e: Peak Deaths
+figure('Name', 'Figure 1e: Impact on Highest Peak Daily Deaths (Multi-Wave)');
+plot(shifts, peak_deaths_fig1, '-o', 'LineWidth', 1.5, 'MarkerSize', 6);
+title('Impact of Shifting Interventions on Highest Peak Daily Deaths (Multi-Wave)');
+ylabel('Highest Peak Daily Deaths'); xlabel('Shift in Intervention Timing (Days)'); grid off; ax = gca; ax.XTick = shifts;
+
+% Figure 1f: Total Deaths
+figure('Name', 'Figure 1f: Impact on Total Deaths (Multi-Wave)');
+plot(shifts, total_deaths_fig1, '-x', 'LineWidth', 1.5, 'MarkerSize', 6, 'Color', [0.8500 0.3250 0.0980]);
+title('Impact of Shifting Interventions on Total Deaths (Multi-Wave)');
+ylabel('Total Deaths'); xlabel('Shift in Intervention Timing (Days)'); grid off; ax = gca; ax.XTick = shifts;
+
+
+min_peak_height_cases = max(baseline_daily_cases) * 0.1; 
+min_peak_dist_days = 60; % Minimum 60 days between peaks
+
+figure('Name', 'Baseline Multi-Wave Scenario: Daily Cases with Peaks');
+plot(all_dates_sim_overall, baseline_daily_cases, 'LineWidth',1.5);
+hold on;
+[pks_c, locs_c] = findpeaks(baseline_daily_cases, 'MinPeakHeight', min_peak_height_cases, 'MinPeakDistance', floor(min_peak_dist_days / (days(all_dates_sim_overall(2)-all_dates_sim_overall(1)))) );
+plot(all_dates_sim_overall(locs_c), pks_c, 'rv', 'MarkerFaceColor','r', 'MarkerSize',8);
+title('Baseline Multi-Wave Daily Cases'); ylabel('Daily Cases'); xlabel('Date'); legend('Cases', 'Identified Peaks'); grid off;
+hold off;
+
+figure('Name', 'Baseline Multi-Wave Scenario: Daily Admissions with Peaks');
+min_peak_height_adms = max(baseline_daily_adms) * 0.1;
+plot(all_dates_sim_overall, baseline_daily_adms, 'LineWidth',1.5);
+hold on;
+[pks_a, locs_a] = findpeaks(baseline_daily_adms, 'MinPeakHeight', min_peak_height_adms, 'MinPeakDistance', floor(min_peak_dist_days / (days(all_dates_sim_overall(2)-all_dates_sim_overall(1)))) );
+plot(all_dates_sim_overall(locs_a), pks_a, 'rv', 'MarkerFaceColor','r', 'MarkerSize',8);
+title('Baseline Multi-Wave Daily Admissions'); ylabel('Daily Admissions'); xlabel('Date'); legend('Admissions', 'Identified Peaks'); grid off;
+hold off;
+
+figure('Name', 'Baseline Multi-Wave Scenario: Daily Deaths with Peaks');
+min_peak_height_deaths = max(baseline_daily_deaths) * 0.1;
+plot(all_dates_sim_overall, baseline_daily_deaths, 'LineWidth',1.5);
+hold on;
+[pks_d, locs_d] = findpeaks(baseline_daily_deaths, 'MinPeakHeight', min_peak_height_deaths, 'MinPeakDistance', floor(min_peak_dist_days / (days(all_dates_sim_overall(2)-all_dates_sim_overall(1)))) );
+plot(all_dates_sim_overall(locs_d), pks_d, 'rv', 'MarkerFaceColor','r', 'MarkerSize',8);
+title('Baseline Multi-Wave Daily Deaths'); ylabel('Daily Deaths'); xlabel('Date'); legend('Deaths', 'Identified Peaks'); grid off;
+hold off;
+
+disp('--- Script Finished ---');
+disp('Please check the command window for numerical data and the generated figures.');
+disp('IMPORTANT: The multi-phase beta schedules are examples. You MUST customize them for meaningful results.');
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
